@@ -1,0 +1,704 @@
+# Mouse Gravity Constants Reference
+
+This file describes the constants used by the mouse-gravity script, including their purpose, expected data type, reasonable values, practical limits, and interactions with other settings.
+
+## Physics Constants
+
+### `GRAVITY`
+
+```python
+GRAVITY = 1800.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Controls the acceleration pulling the cursor toward the current gravity target.
+
+The value is effectively measured in pixels per second squared. A larger value makes the cursor gain inward velocity more quickly.
+
+**Reasonable values:**
+
+- `500.0` to `1000.0` — weak pull
+- `1000.0` to `2500.0` — moderate to strong pull
+- `2500.0` to `5000.0` — very strong pull
+- Above `5000.0` — usually difficult to control
+
+**Practical limits:**
+
+- Minimum: `0.0`
+- No strict mathematical maximum
+- Negative values should not be used unless intentionally creating repulsion
+
+At `0.0`, there is no gravitational pull.
+
+**Interactions:**
+
+- Higher `GRAVITY` makes `AWAY_INPUT_MULTIPLIER` feel weaker because outward movement must overcome a stronger inward acceleration.
+- Higher `GRAVITY` generally requires a higher `MAX_SPEED` if you want wide or fast orbits.
+- Higher `GRAVITY` may require a higher `NORMAL_INPUT_STRENGTH` if physical mouse movement feels too weak.
+- Higher `GRAVITY` combined with high `DRAG` retention can create very energetic motion.
+- A larger `STOP_RADIUS` can prevent very strong gravity from causing jitter around the target.
+
+---
+
+### `MAX_SPEED`
+
+```python
+MAX_SPEED = 1800.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Maximum simulated cursor velocity, in approximately pixels per second.
+
+After gravity and user input modify velocity, the total speed is clamped to this value.
+
+**Reasonable values:**
+
+- `500.0` to `1000.0` — slow
+- `1000.0` to `2500.0` — normal
+- `2500.0` to `5000.0` — fast
+- Above `5000.0` — increasingly difficult to control
+
+**Practical limits:**
+
+- Should be greater than `0.0`
+- No strict upper limit
+- Extremely high values can cause large cursor jumps between frames
+
+**Interactions:**
+
+- Increasing `GRAVITY` without increasing `MAX_SPEED` causes the cursor to reach the speed cap more often.
+- Large `LATERAL_BOOST_MULTIPLIER` values may have little additional effect once `MAX_SPEED` is reached.
+- Low `MAX_SPEED` makes orbits smaller and more constrained.
+- High `MAX_SPEED` combined with low `FPS` can make motion appear jumpy.
+
+---
+
+### `DRAG`
+
+```python
+DRAG = 0.992
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Controls how much velocity is retained after each physics update.
+
+Every frame:
+
+```python
+velocity_x *= DRAG
+velocity_y *= DRAG
+```
+
+A value closer to `1.0` means less momentum is lost.
+
+**Reasonable values:**
+
+- `0.90` to `0.96` — very heavy damping
+- `0.97` to `0.99` — noticeable damping
+- `0.990` to `0.997` — good for orbital motion
+- `0.998` to `0.9999` — very persistent momentum
+
+**Practical limits:**
+
+- Normally: `0.0 < DRAG <= 1.0`
+- `1.0` means no velocity loss
+- Above `1.0` adds energy every frame and should normally be avoided
+- `0.0` destroys all velocity every frame
+
+**Interactions:**
+
+- Higher `DRAG` makes gravity, user input, and lateral boosts accumulate for longer.
+- Higher `DRAG` makes orbiting easier but also makes the system harder to stop.
+- With high `GRAVITY`, values very close to `1.0` can produce high sustained speeds.
+- Lowering `DRAG` can compensate for a large `NORMAL_INPUT_STRENGTH`.
+- `MAX_SPEED` becomes more important as `DRAG` approaches `1.0`.
+
+**Important:**  
+Because drag is applied once per frame, its effective strength depends on `FPS`. Changing `FPS` changes how often drag is applied.
+
+---
+
+### `STOP_RADIUS`
+
+```python
+STOP_RADIUS = 3.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Distance from the gravity target, in pixels, at which the cursor is considered to have reached the target.
+
+Inside this radius, velocity is cleared and the cursor is placed directly on the target.
+
+**Reasonable values:**
+
+- `1.0` to `2.0` — precise, but may jitter
+- `3.0` to `5.0` — normal
+- `5.0` to `15.0` — forgiving
+- Above `15.0` — noticeably large dead zone
+
+**Practical limits:**
+
+- Minimum: `0.0`
+- Should generally remain much smaller than the desired orbit radius
+
+**Interactions:**
+
+- Higher `GRAVITY` may require a slightly larger `STOP_RADIUS` to avoid jitter near the target.
+- Large `STOP_RADIUS` can destroy small orbits because the cursor will be considered to have reached the target too early.
+- High user-input strength is easier to manage with a slightly larger `STOP_RADIUS`.
+
+---
+
+### `FPS`
+
+```python
+FPS = 120
+```
+
+**Type:** `int`
+
+**Meaning:**  
+Target number of physics updates per second.
+
+The loop sleeps for approximately:
+
+```python
+1 / FPS
+```
+
+between updates.
+
+**Reasonable values:**
+
+- `30` — low CPU use, visibly coarse
+- `60` — standard
+- `90` to `144` — smooth
+- `120` — good default
+- `240` — very smooth but unnecessary for many systems
+
+**Practical limits:**
+
+- Must be greater than `0`
+- Real execution rate is limited by Windows, Python, scheduler timing, and system load
+- Extremely high values increase CPU usage without guaranteeing equivalent timing precision
+
+**Interactions:**
+
+- `DRAG` is applied once per frame, so changing `FPS` changes the effective amount of damping per second.
+- Higher `FPS` makes large `MAX_SPEED` values appear smoother.
+- Higher `FPS` reduces the movement distance per individual frame.
+- Gravity uses `dt`, so gravitational acceleration itself is mostly frame-rate independent.
+- User-input detection may become more sensitive at high `FPS` because physical movement is measured over shorter intervals.
+
+---
+
+## Mouse Input Constants
+
+### `NORMAL_INPUT_STRENGTH`
+
+```python
+NORMAL_INPUT_STRENGTH = 25.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Controls how strongly actual physical mouse movement modifies the simulated velocity.
+
+This affects both radial and tangential user input before their individual multipliers are applied.
+
+**Reasonable values:**
+
+- `5.0` to `15.0` — subtle influence
+- `15.0` to `35.0` — normal
+- `35.0` to `75.0` — strong
+- Above `75.0` — very sensitive
+
+**Practical limits:**
+
+- Minimum: `0.0`
+- No strict maximum
+- Negative values reverse the effect of physical input and should normally be avoided
+
+**Interactions:**
+
+- Multiplied by `TOWARD_INPUT_MULTIPLIER` for inward movement.
+- Multiplied by `AWAY_INPUT_MULTIPLIER` for outward movement.
+- Multiplied by `LATERAL_BOOST_MULTIPLIER` for tangential movement while boost is active.
+- Higher `GRAVITY` may require higher input strength to preserve user control.
+- High values combined with high `DRAG` can retain large amounts of injected momentum.
+- `MAX_SPEED` limits the final effect.
+
+---
+
+### `LATERAL_BOOST_MULTIPLIER`
+
+```python
+LATERAL_BOOST_MULTIPLIER = 4.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Multiplier applied to the tangential component of actual physical mouse movement when lateral boost is enabled.
+
+It does **not** continuously add energy by itself. If the user does not physically move the mouse, this multiplier contributes nothing.
+
+For example:
+
+```python
+NORMAL_INPUT_STRENGTH = 25.0
+LATERAL_BOOST_MULTIPLIER = 4.0
+```
+
+produces an effective boosted tangential input strength of:
+
+```text
+25 × 4 = 100
+```
+
+**Reasonable values:**
+
+- `1.0` — no boost
+- `2.0` to `3.0` — mild boost
+- `3.0` to `6.0` — strong boost
+- `6.0` to `10.0` — very aggressive
+- Above `10.0` — small physical movements can produce large velocity changes
+
+**Practical limits:**
+
+- Minimum normally: `1.0`
+- `0.0` disables tangential user influence while boost is active
+- Negative values reverse the boosted lateral direction and should normally be avoided
+
+**Interactions:**
+
+- Directly multiplies `NORMAL_INPUT_STRENGTH`.
+- High values are constrained by `MAX_SPEED`.
+- High values combined with high `DRAG` make orbital momentum persist much longer.
+- This value has no direct effect on inward or outward radial movement.
+- Stronger `GRAVITY` can support faster orbiting before the cursor escapes outward.
+
+---
+
+### `TOWARD_INPUT_MULTIPLIER`
+
+```python
+TOWARD_INPUT_MULTIPLIER = 1.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Controls how effective physical mouse movement is when the user moves toward the gravity target.
+
+A value of `1.0` means normal radial input strength.
+
+**Reasonable values:**
+
+- `0.5` — reduced inward control
+- `1.0` — normal
+- `1.0` to `2.0` — enhanced inward control
+
+**Practical limits:**
+
+- Usually `>= 0.0`
+- Negative values reverse inward input and are not recommended
+
+**Interactions:**
+
+Effective inward input strength is:
+
+```text
+NORMAL_INPUT_STRENGTH × TOWARD_INPUT_MULTIPLIER
+```
+
+For the defaults:
+
+```text
+25 × 1.0 = 25
+```
+
+- Raising this makes moving with gravity easier.
+- Lowering `AWAY_INPUT_MULTIPLIER` relative to this value increases the asymmetry between inward and outward movement.
+- Gravity itself already assists inward movement, so even equal inward/outward multipliers do not produce equal effort.
+
+---
+
+### `AWAY_INPUT_MULTIPLIER`
+
+```python
+AWAY_INPUT_MULTIPLIER = 0.3
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Controls how effective physical mouse movement is when attempting to move directly away from the target.
+
+This is intentionally lower than `TOWARD_INPUT_MULTIPLIER` so that moving against gravity requires more physical effort.
+
+**Reasonable values:**
+
+- `0.1` to `0.2` — very difficult to pull away
+- `0.25` to `0.4` — noticeably resistant
+- `0.5` to `0.75` — moderate resistance
+- `1.0` — equal input scaling inward and outward
+
+**Practical limits:**
+
+- Normally: `0.0` to `1.0`
+- `0.0` means physical radial movement cannot directly add outward momentum
+- Above `1.0` makes outward physical input stronger than normal
+- Negative values make outward movement behave incorrectly for the intended model
+
+**Interactions:**
+
+Effective outward input strength is:
+
+```text
+NORMAL_INPUT_STRENGTH × AWAY_INPUT_MULTIPLIER
+```
+
+With:
+
+```python
+NORMAL_INPUT_STRENGTH = 25.0
+AWAY_INPUT_MULTIPLIER = 0.3
+```
+
+the effective outward strength is:
+
+```text
+7.5
+```
+
+compared with inward strength:
+
+```text
+25.0
+```
+
+assuming:
+
+```python
+TOWARD_INPUT_MULTIPLIER = 1.0
+```
+
+Gravity also continuously opposes outward movement, so the real difference in required effort is greater than the multiplier ratio alone suggests.
+
+A useful relationship is:
+
+```text
+AWAY_INPUT_MULTIPLIER < TOWARD_INPUT_MULTIPLIER
+```
+
+If the design requirement is that moving away should always be harder than moving toward the target.
+
+---
+
+## Click Recognition
+
+### `CLICK_SEQUENCE_TIMEOUT`
+
+```python
+CLICK_SEQUENCE_TIMEOUT = 0.35
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Maximum delay, in seconds, used to group consecutive clicks into a single click sequence.
+
+The current controls are:
+
+```text
+1 click   = toggle lateral boost
+2 clicks  = assign new gravity target
+3 clicks  = ignored
+4 clicks  = exit
+```
+
+The program delays processing shorter click sequences because it must determine whether additional clicks are coming.
+
+**Reasonable values:**
+
+- `0.20` to `0.25` — requires fast clicking
+- `0.30` to `0.40` — normal
+- `0.40` to `0.60` — forgiving
+- Above `0.60` — controls may feel noticeably delayed
+
+**Practical limits:**
+
+- Must be greater than `0.0`
+- Very small values make double and quadruple clicks difficult
+- Very large values make single-click actions feel slow
+
+**Interactions:**
+
+- Does not affect cursor physics.
+- Directly controls how responsive single-click boost toggling feels.
+- Increasing it makes quadruple-click detection easier but increases the delay before a single or double click is finalized.
+
+---
+
+## Windows Virtual Desktop Constants
+
+These constants come from the Windows API and should **not** normally be changed.
+
+### `SM_XVIRTUALSCREEN`
+
+```python
+SM_XVIRTUALSCREEN = 76
+```
+
+**Type:** `int`
+
+Windows system-metric identifier for the left edge of the entire virtual desktop.
+
+Do not change this value.
+
+---
+
+### `SM_YVIRTUALSCREEN`
+
+```python
+SM_YVIRTUALSCREEN = 77
+```
+
+**Type:** `int`
+
+Windows system-metric identifier for the top edge of the entire virtual desktop.
+
+Do not change this value.
+
+---
+
+### `SM_CXVIRTUALSCREEN`
+
+```python
+SM_CXVIRTUALSCREEN = 78
+```
+
+**Type:** `int`
+
+Windows system-metric identifier for the total width of the virtual desktop.
+
+Do not change this value.
+
+---
+
+### `SM_CYVIRTUALSCREEN`
+
+```python
+SM_CYVIRTUALSCREEN = 79
+```
+
+**Type:** `int`
+
+Windows system-metric identifier for the total height of the virtual desktop.
+
+Do not change this value.
+
+---
+
+## Derived Screen Bounds
+
+These values are calculated from Windows rather than manually configured:
+
+```python
+SCREEN_LEFT = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+SCREEN_TOP = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+
+SCREEN_WIDTH = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+SCREEN_HEIGHT = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+
+SCREEN_RIGHT = SCREEN_LEFT + SCREEN_WIDTH - 1
+SCREEN_BOTTOM = SCREEN_TOP + SCREEN_HEIGHT - 1
+```
+
+**Type:** `int`
+
+These describe the rectangular bounds of the complete Windows virtual desktop.
+
+They can contain negative coordinates when a monitor is positioned to the left of or above the primary monitor.
+
+These values should not be manually changed.
+
+Note that the virtual desktop is a bounding rectangle. If the physical monitors form an irregular shape, some locations inside this rectangle may not correspond to an actual display.
+
+---
+
+# Recommended Starting Configuration
+
+A balanced setup:
+
+```python
+GRAVITY = 1800.0
+
+MAX_SPEED = 1800.0
+DRAG = 0.992
+STOP_RADIUS = 3.0
+FPS = 120
+
+NORMAL_INPUT_STRENGTH = 25.0
+
+TOWARD_INPUT_MULTIPLIER = 1.0
+AWAY_INPUT_MULTIPLIER = 0.3
+
+LATERAL_BOOST_MULTIPLIER = 4.0
+
+CLICK_SEQUENCE_TIMEOUT = 0.35
+```
+
+## More Stable / Easier to Control
+
+```python
+GRAVITY = 1400.0
+
+MAX_SPEED = 1400.0
+DRAG = 0.985
+STOP_RADIUS = 4.0
+FPS = 120
+
+NORMAL_INPUT_STRENGTH = 20.0
+
+TOWARD_INPUT_MULTIPLIER = 1.0
+AWAY_INPUT_MULTIPLIER = 0.35
+
+LATERAL_BOOST_MULTIPLIER = 3.0
+```
+
+## Strong Orbital Behavior
+
+```python
+GRAVITY = 1800.0
+
+MAX_SPEED = 2500.0
+DRAG = 0.996
+STOP_RADIUS = 3.0
+FPS = 120
+
+NORMAL_INPUT_STRENGTH = 30.0
+
+TOWARD_INPUT_MULTIPLIER = 1.0
+AWAY_INPUT_MULTIPLIER = 0.25
+
+LATERAL_BOOST_MULTIPLIER = 5.0
+```
+
+# Important Relationships
+
+The most important constants should generally be tuned together.
+
+### Gravity vs. user control
+
+Increasing:
+
+```python
+GRAVITY
+```
+
+makes all outward movement harder.
+
+If control becomes too weak, increase:
+
+```python
+NORMAL_INPUT_STRENGTH
+```
+
+rather than immediately reducing gravity.
+
+---
+
+### Momentum persistence
+
+The primary momentum controls are:
+
+```python
+DRAG
+MAX_SPEED
+```
+
+Higher `DRAG` retains momentum longer.
+
+Higher `MAX_SPEED` allows that retained momentum to reach larger values.
+
+Using both at very high values can make the cursor difficult to regain control over.
+
+---
+
+### Orbit creation
+
+Orbital behavior primarily depends on:
+
+```python
+GRAVITY
+NORMAL_INPUT_STRENGTH
+LATERAL_BOOST_MULTIPLIER
+DRAG
+MAX_SPEED
+```
+
+`GRAVITY` bends the trajectory toward the target.
+
+`LATERAL_BOOST_MULTIPLIER` helps the user inject sideways momentum.
+
+`DRAG` determines how long that momentum survives.
+
+`MAX_SPEED` determines how energetic the orbit is allowed to become.
+
+---
+
+### Inward vs. outward effort
+
+The intended relationship is:
+
+```text
+AWAY_INPUT_MULTIPLIER < TOWARD_INPUT_MULTIPLIER
+```
+
+A stronger inequality produces greater resistance when moving away.
+
+For example:
+
+```python
+TOWARD_INPUT_MULTIPLIER = 1.0
+AWAY_INPUT_MULTIPLIER = 0.3
+```
+
+means outward physical input has only 30% of the radial effect of inward physical input, before accounting for gravity itself.
+
+---
+
+### Frame rate and drag
+
+`DRAG` is currently frame-dependent.
+
+For example:
+
+```python
+DRAG = 0.992
+FPS = 120
+```
+
+does not produce exactly the same damping behavior as:
+
+```python
+DRAG = 0.992
+FPS = 60
+```
+
+because drag is applied half as many times per second at 60 FPS.
+
+If `FPS` will remain fixed, this is usually not a problem.
+
+If you want to experiment heavily with different frame rates, the drag calculation should eventually be converted to a time-based formula so that damping remains consistent regardless of FPS.

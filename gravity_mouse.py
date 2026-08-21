@@ -96,15 +96,16 @@ print(
 # Tray icon
 # ------------------------------------------------------------
 
-def create_vortex_icon(size:int=64):
+def create_vortex_icon(size=64, boost_active=False):
     """
-    Create a vortex icon for the system tray.
+    Create a vortex icon with optional boost indicator.
 
     Args:
-        size (int): The size of the icon in pixels. Default is 64.
+        size (int): The size of the icon in pixels (width and height).
+        boost_active (bool): Whether the lateral boost is active.
 
     Returns:
-        PIL.Image: The generated vortex icon as a PIL Image object.
+        PIL.Image: The generated vortex icon image.
     """
     image = Image.new(
         "RGBA",
@@ -117,9 +118,9 @@ def create_vortex_icon(size:int=64):
     center_x = size / 2
     center_y = size / 2
 
+    # Vortex
     for arm in range(4):
         points = []
-
         arm_offset = arm * (math.pi / 2)
 
         for i in range(120):
@@ -148,6 +149,7 @@ def create_vortex_icon(size:int=64):
             width=3,
         )
 
+    # Dark center
     center_radius = size * 0.10
 
     draw.ellipse(
@@ -160,22 +162,175 @@ def create_vortex_icon(size:int=64):
         fill=(5, 0, 10, 255),
     )
 
-    return image
+    # --------------------------------------------------------
+    # Green boost arrow
+    # --------------------------------------------------------
 
+    if boost_active:
+        badge_background = (200, 200, 200, 255)
+        green = (0, 150, 35, 255)
+        outline = (0, 50, 10, 255)
+
+        # --------------------------------------------------------
+        # Badge
+        # --------------------------------------------------------
+
+        box_left = int(size * 0.50)
+        box_top = int(size * -0.04)
+        box_right = int(size * 1.02)
+        box_bottom = int(size * 0.50)
+
+        draw.rectangle(
+            (
+                box_left,
+                box_top,
+                box_right,
+                box_bottom,
+            ),
+            fill=badge_background,
+        )
+
+
+        # --------------------------------------------------------
+        # Badge dimensions
+        # --------------------------------------------------------
+
+        badge_width = box_right - box_left
+        badge_height = box_bottom - box_top
+
+        center_x = box_left + badge_width / 2
+
+
+        # --------------------------------------------------------
+        # Arrow proportions
+        #
+        # These are all relative to the badge.
+        # --------------------------------------------------------
+
+        ARROW_TOP_MARGIN = 0.05
+        ARROW_BOTTOM_MARGIN = 0.05
+
+        ARROW_HEAD_WIDTH = 0.70
+        ARROW_HEAD_HEIGHT = 0.40
+
+        ARROW_SHAFT_WIDTH = 0.30
+
+
+        # --------------------------------------------------------
+        # Calculate arrow dimensions
+        # --------------------------------------------------------
+
+        arrow_top = (
+            box_top
+            + badge_height * ARROW_TOP_MARGIN
+        )
+
+        arrow_bottom = (
+            box_bottom
+            - badge_height * ARROW_BOTTOM_MARGIN
+        )
+
+        head_half_width = (
+            badge_width
+            * ARROW_HEAD_WIDTH
+            / 2
+        )
+
+        head_height = (
+            badge_height
+            * ARROW_HEAD_HEIGHT
+        )
+
+        shaft_half_width = (
+            badge_width
+            * ARROW_SHAFT_WIDTH
+            / 2
+        )
+
+        head_bottom = (
+            arrow_top
+            + head_height
+        )
+
+
+        # --------------------------------------------------------
+        # Arrow
+        # --------------------------------------------------------
+
+        arrow_points = [
+            # Tip
+            (
+                center_x,
+                arrow_top,
+            ),
+
+            # Right side of arrowhead
+            (
+                center_x + head_half_width,
+                head_bottom,
+            ),
+
+            # Right shoulder
+            (
+                center_x + shaft_half_width,
+                head_bottom,
+            ),
+
+            # Bottom-right shaft
+            (
+                center_x + shaft_half_width,
+                arrow_bottom,
+            ),
+
+            # Bottom-left shaft
+            (
+                center_x - shaft_half_width,
+                arrow_bottom,
+            ),
+
+            # Left shoulder
+            (
+                center_x - shaft_half_width,
+                head_bottom,
+            ),
+
+            # Left side of arrowhead
+            (
+                center_x - head_half_width,
+                head_bottom,
+            ),
+        ]
+
+        draw.polygon(
+            arrow_points,
+            fill=green,
+            outline=outline,
+            width=max(
+                1,
+                int(badge_width * 0.05),
+            ),
+        )
+    return image
 
 def update_tray_status():
     """
-    Update the tray icon's title to reflect the current state of the program.
+    Update the tray icon's title and icon based on the current boost state.
     """
     if tray_icon is None:
         return
 
-    boost_state = "ON" if lateral_boost else "OFF"
+    with state_lock:
+        boost_active = lateral_boost
+
+    boost_state = "ON" if boost_active else "OFF"
 
     tray_icon.title = (
         f"Mouse Gravity: ACTIVE | Boost: {boost_state}"
     )
 
+    tray_icon.icon = create_vortex_icon(
+        boost_active=boost_active
+    )
 
 # ------------------------------------------------------------
 # Shutdown
@@ -650,18 +805,15 @@ def main():
 
     tray_icon = pystray.Icon(
         "mouse_gravity",
-        create_vortex_icon(),
+        create_vortex_icon(boost_active=False),
         "Mouse Gravity: ACTIVE | Boost: OFF",
         menu=pystray.Menu(
-
             pystray.MenuItem(
                 "Mouse Gravity: ACTIVE",
                 lambda: None,
                 enabled=False,
             ),
-
             pystray.Menu.SEPARATOR,
-
             pystray.MenuItem(
                 "Exit",
                 tray_exit,

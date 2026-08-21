@@ -42,6 +42,241 @@ At `0.0`, there is no gravitational pull.
 
 ---
 
+### `GRAVITY_DISTANCE_POWER`
+
+```python
+GRAVITY_DISTANCE_POWER = 1.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Controls how strongly distance from the target affects gravitational pull.
+
+The gravity calculation is:
+
+```python
+gravity_strength = (
+    GRAVITY
+    * (REFERENCE_DISTANCE / gravity_distance)
+    ** GRAVITY_DISTANCE_POWER
+)
+```
+
+Higher values make gravity increase more sharply as the cursor gets closer to the target.
+
+Lower values make gravity behave more uniformly across distance.
+
+**Reasonable values:**
+
+- `0.0` — constant gravity; distance has no effect
+- `0.5` — mild proximity effect
+- `1.0` — moderate inverse-distance behavior
+- `1.0` to `1.3` — good range for controlled eccentric-orbit behavior
+- `1.5` — strong proximity effect
+- `2.0` — inverse-square behavior; very strong close-range pull
+- Above `2.0` — usually too aggressive for controllable cursor movement
+
+**Practical limits:**
+
+- Usually: `0.0` to `2.0`
+- `0.0` disables distance scaling entirely
+- Negative values reverse the intended relationship, making gravity weaker near the target and stronger farther away
+- There is no strict mathematical upper limit, but large values can produce extreme close-range acceleration
+
+**Interactions:**
+
+- Higher `GRAVITY_DISTANCE_POWER` increases the importance of `MIN_GRAVITY_DISTANCE`.
+- Higher values make `MAX_GRAVITY_ACCELERATION` more likely to be reached.
+- Higher values can create tighter spirals and make close approaches harder to control.
+- Lower values produce smoother, broader trajectories.
+- `GRAVITY` controls the overall strength, while `GRAVITY_DISTANCE_POWER` controls how strongly that strength changes with distance.
+- `REFERENCE_DISTANCE` determines the distance where gravity is approximately equal to `GRAVITY`.
+
+For example, when the cursor is at half of `REFERENCE_DISTANCE`:
+
+```text
+GRAVITY_DISTANCE_POWER    Gravity multiplier
+
+0.0                       1.00x
+0.5                       1.41x
+1.0                       2.00x
+1.2                       2.30x
+1.5                       2.83x
+2.0                       4.00x
+```
+
+A good starting value is:
+
+```python
+GRAVITY_DISTANCE_POWER = 1.0
+```
+
+This preserves the effect of stronger gravity near the target without producing the very aggressive close-range pull of inverse-square gravity.
+
+---
+
+### `REFERENCE_DISTANCE`
+
+```python
+REFERENCE_DISTANCE = 300.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Defines the distance, in pixels, where gravitational acceleration is approximately equal to `GRAVITY`.
+
+At:
+
+```text
+distance = REFERENCE_DISTANCE
+```
+
+the ratio:
+
+```python
+REFERENCE_DISTANCE / gravity_distance
+```
+
+is `1.0`, so the resulting gravity strength is approximately:
+
+```python
+GRAVITY
+```
+
+**Reasonable values:**
+
+- `100.0` to `200.0` — proximity effects concentrated near the target
+- `200.0` to `400.0` — normal
+- `400.0` to `800.0` — distance scaling affects a much larger portion of the screen
+
+**Practical limits:**
+
+- Must be greater than `0.0`
+- No strict maximum
+- Very large values can make gravity unusually strong across the entire desktop
+
+**Interactions:**
+
+- Increasing `REFERENCE_DISTANCE` increases gravity at distances below that value.
+- Decreasing it makes gravity weaker at larger distances.
+- Its effect becomes much stronger as `GRAVITY_DISTANCE_POWER` increases.
+- `GRAVITY` remains the approximate acceleration at exactly `REFERENCE_DISTANCE`.
+
+For example:
+
+```python
+GRAVITY = 1400.0
+REFERENCE_DISTANCE = 300.0
+GRAVITY_DISTANCE_POWER = 1.0
+```
+
+produces approximately:
+
+```text
+Distance    Gravity
+
+600 px      700
+300 px      1400
+150 px      2800
+75 px       5600
+```
+
+before any minimum-distance or maximum-acceleration limits are applied.
+
+---
+
+### `MIN_GRAVITY_DISTANCE`
+
+```python
+MIN_GRAVITY_DISTANCE = 40.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Sets the minimum distance used by the gravity calculation.
+
+The actual cursor may move closer than this value, but the gravity formula behaves as though the cursor were still this far away.
+
+For example:
+
+```python
+gravity_distance = max(
+    distance,
+    MIN_GRAVITY_DISTANCE,
+)
+```
+
+This prevents gravity from approaching extreme values near the target.
+
+**Reasonable values:**
+
+- `10.0` to `25.0` — very strong close approaches
+- `30.0` to `60.0` — normal
+- `60.0` to `120.0` — heavily softened close-range gravity
+
+**Practical limits:**
+
+- Must be greater than `0.0`
+- Should normally be greater than `STOP_RADIUS`
+- Very small values can create extreme acceleration near the target
+
+**Interactions:**
+
+- Becomes increasingly important as `GRAVITY_DISTANCE_POWER` increases.
+- Lower values allow stronger acceleration during close passes.
+- Higher values flatten the gravity curve near the target.
+- `MAX_GRAVITY_ACCELERATION` provides an additional safety cap.
+- If `MIN_GRAVITY_DISTANCE` is large, changing `GRAVITY_DISTANCE_POWER` may have less noticeable effect close to the target.
+
+---
+
+### `MAX_GRAVITY_ACCELERATION`
+
+```python
+MAX_GRAVITY_ACCELERATION = 5000.0
+```
+
+**Type:** `float`
+
+**Meaning:**  
+Maximum gravitational acceleration that can be applied, regardless of distance.
+
+The calculated gravity is capped with:
+
+```python
+gravity_strength = min(
+    gravity_strength,
+    MAX_GRAVITY_ACCELERATION,
+)
+```
+
+This prevents very close approaches from generating excessive acceleration.
+
+**Reasonable values:**
+
+- `2000.0` to `4000.0` — heavily controlled
+- `4000.0` to `8000.0` — normal
+- `8000.0` to `15000.0` — aggressive
+- Above `15000.0` — usually unnecessary
+
+**Practical limits:**
+
+- Should be greater than `0.0`
+- Usually should be greater than `GRAVITY`
+- No strict maximum
+
+**Interactions:**
+
+- Higher `GRAVITY_DISTANCE_POWER` causes this cap to be reached more often.
+- Smaller `MIN_GRAVITY_DISTANCE` also makes the cap more important.
+- Lowering this value reduces violent close-range spiraling without changing distant gravity as much.
+- If this value is too low, the distance-based gravity curve becomes effectively flattened near the target.
+
+---
+
 ### `MAX_SPEED`
 
 ```python

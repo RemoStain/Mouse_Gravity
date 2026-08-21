@@ -2,6 +2,10 @@ import math
 import threading
 import time
 
+import logging
+from datetime import datetime
+from pathlib import Path
+
 from PIL import Image, ImageDraw
 from pynput import mouse
 import pystray
@@ -9,17 +13,34 @@ import pystray
 import ctypes
 
 
+# ------------------------------------------------------------
+# Developer logging
+# ------------------------------------------------------------
+
+ENABLE_RUN_LOG = True
+
+# Number of physics-state snapshots written per second.
+# Events such as clicks, target changes, boost toggles,
+# wall collisions, and shutdowns are always logged immediately.
+LOG_TELEMETRY_HZ = 10
+
 
 # ------------------------------------------------------------
 # Physics settings
 # ------------------------------------------------------------
 
-GRAVITY = 1750.0    # pixels per second squared
+GRAVITY = 1500.0
 
-MAX_SPEED = 1800.0  # pixels per second
-DRAG = 0.900        # per frame
-STOP_RADIUS = 3.0   # pixels
-FPS = 120           # frames per second
+GRAVITY_DISTANCE_POWER = 1.1
+REFERENCE_DISTANCE = 300.0
+
+MIN_GRAVITY_DISTANCE = 40.0
+MAX_GRAVITY_ACCELERATION = 6000.0
+
+MAX_SPEED = 3000.0
+DRAG = 0.996
+STOP_RADIUS = 5.0
+FPS = 120
 
 # How strongly actual mouse movement affects orbital momentum
 TOWARD_INPUT_MULTIPLIER = 1.0   # pixels per second per pixel of user input toward the target
@@ -90,6 +111,133 @@ print(
     f"{SCREEN_LEFT}, {SCREEN_TOP} -> "
     f"{SCREEN_RIGHT}, {SCREEN_BOTTOM}"
 )
+
+
+
+# ------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------
+
+logger = logging.getLogger("mouse_gravity")
+logger.setLevel(logging.DEBUG)
+
+logger.propagate = False
+
+
+def setup_logging():
+    """
+    Create a timestamped log file for this run.
+
+    Returns:
+        Path | None:
+            Path to the log file when logging is enabled,
+            otherwise None.
+    """
+    if not ENABLE_RUN_LOG:
+        logger.disabled = True
+        return None
+
+    logger.disabled = False
+
+    timestamp = datetime.now().strftime(
+        "%Y-%m-%d_%H-%M-%S"
+    )
+
+    log_path = (
+        Path(__file__).resolve().parent
+        / f"logs/mouse_gravity_{timestamp}.log"
+    )
+
+    handler = logging.FileHandler(
+        log_path,
+        encoding="utf-8",
+    )
+
+    handler.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter(
+        "%(asctime)s.%(msecs)03d | "
+        "%(levelname)-8s | "
+        "%(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    handler.setFormatter(formatter)
+
+    logger.handlers.clear()
+    logger.addHandler(handler)
+
+    return log_path
+
+
+def log_configuration():
+    """
+    Record all important tuning constants at startup.
+    """
+    logger.info("Mouse Gravity started")
+
+    logger.info(
+        "CONFIG  | "
+        "GRAVITY=%s | "
+        "REFERENCE_DISTANCE=%s | "
+        "GRAVITY_DISTANCE_POWER=%s | "
+        "MIN_GRAVITY_DISTANCE=%s | "
+        "MAX_GRAVITY_ACCELERATION=%s",
+        GRAVITY,
+        REFERENCE_DISTANCE,
+        GRAVITY_DISTANCE_POWER,
+        MIN_GRAVITY_DISTANCE,
+        MAX_GRAVITY_ACCELERATION,
+    )
+
+    logger.info(
+        "CONFIG | "
+        "MAX_SPEED=%s | "
+        "DRAG=%s | "
+        "STOP_RADIUS=%s | "
+        "FPS=%s",
+        MAX_SPEED,
+        DRAG,
+        STOP_RADIUS,
+        FPS,
+    )
+
+    logger.info(
+        "CONFIG | "
+        "NORMAL_INPUT_STRENGTH=%s | "
+        "TOWARD_INPUT_MULTIPLIER=%s | "
+        "AWAY_INPUT_MULTIPLIER=%s | "
+        "LATERAL_BOOST_MULTIPLIER=%s",
+        NORMAL_INPUT_STRENGTH,
+        TOWARD_INPUT_MULTIPLIER,
+        AWAY_INPUT_MULTIPLIER,
+        LATERAL_BOOST_MULTIPLIER,
+    )
+
+    logger.info(
+        "CONFIG | "
+        "CLICK_SEQUENCE_TIMEOUT=%s | "
+        "LOG_TELEMETRY_HZ=%s",
+        CLICK_SEQUENCE_TIMEOUT,
+        LOG_TELEMETRY_HZ,
+    )
+
+    logger.info(
+        "DESKTOP | "
+        "left=%s | "
+        "top=%s | "
+        "right=%s | "
+        "bottom=%s | "
+        "width=%s | "
+        "height=%s",
+        SCREEN_LEFT,
+        SCREEN_TOP,
+        SCREEN_RIGHT,
+        SCREEN_BOTTOM,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+    )
+
 
 
 # ------------------------------------------------------------
@@ -343,6 +491,8 @@ def shutdown():
     """
     global click_timer
 
+    logger.info("SHUTDOWN | beginning shutdown")
+
     running.clear()
 
     with click_lock:
@@ -361,6 +511,7 @@ def tray_exit(icon, item):
         icon (pystray.Icon): The tray icon object.
         item (pystray.MenuItem): The menu item that was clicked.
     """
+    logger.info("EXIT | tray menu")
     shutdown()
 
 
@@ -381,6 +532,8 @@ def process_click_sequence(x, y):
     global target
     global orbit_direction
     global click_timer
+    global velocity_x
+    global velocity_y
 
     with click_lock:
         count = click_count
@@ -406,6 +559,11 @@ def process_click_sequence(x, y):
 
         print(f"Lateral boost: {state}")
 
+        logger.info(
+            "BOOST | state=%s",
+            state,
+        )
+
         update_tray_status()
 
 
@@ -419,6 +577,12 @@ def process_click_sequence(x, y):
 
         with state_lock:
             target = (x, y)
+
+        logger.info(
+            "TARGET | x=%s | y=%s",
+            x,
+            y,
+        )
 
         current_x, current_y = controller.position
 
@@ -453,12 +617,21 @@ def process_click_sequence(x, y):
     # --------------------------------------------------------
     # Triple click
     #
-    # Intentionally do nothing.
+    # Remove target.
     # --------------------------------------------------------
 
     elif count == 3:
 
-        print("Triple click ignored.")
+        target = None
+        velocity_x = 0.0
+        velocity_y = 0.0
+        orbit_direction = 0
+
+        logger.info(
+            "REMOVE TARGET | triple click detected"
+        )
+
+        print("Target removed.")
 
 
 def on_click(x, y, button, pressed):
@@ -511,6 +684,11 @@ def on_click(x, y, button, pressed):
     # IMPORTANT:
     # shutdown() must happen AFTER releasing click_lock.
     if should_exit:
+
+        logger.info(
+            "EXIT | quadruple click detected"
+        )
+
         print("Quadruple click detected. Exiting.")
         shutdown()
         return False
@@ -536,6 +714,15 @@ def gravity_loop():
     # position at the beginning of the next frame is treated as
     # physical/user mouse input.
     expected_x, expected_y = controller.position
+
+    telemetry_interval = (
+        1.0 / LOG_TELEMETRY_HZ
+        if LOG_TELEMETRY_HZ > 0
+        else None
+    )
+
+    last_telemetry_time = 0.0
+
 
     while running.is_set():
 
@@ -578,11 +765,30 @@ def gravity_loop():
 
 
                 # ------------------------------------------------
-                # Gravity
+                # Distance-dependent gravity
+                #
+                # Gravity becomes stronger as the cursor gets
+                # closer to the target.
                 # ------------------------------------------------
 
-                acceleration_x = radial_x * GRAVITY
-                acceleration_y = radial_y * GRAVITY
+                gravity_distance = max(
+                    distance,
+                    MIN_GRAVITY_DISTANCE,
+                )
+
+                gravity_strength = (
+                    GRAVITY
+                    * (REFERENCE_DISTANCE / gravity_distance)
+                    ** GRAVITY_DISTANCE_POWER
+                )
+
+                gravity_strength = min(
+                    gravity_strength,
+                    MAX_GRAVITY_ACCELERATION,
+                )
+
+                acceleration_x = radial_x * gravity_strength
+                acceleration_y = radial_y * gravity_strength
 
                 velocity_x += acceleration_x * dt
                 velocity_y += acceleration_y * dt
@@ -719,6 +925,50 @@ def gravity_loop():
                     + velocity_y * dt
                 )
 
+                # ------------------------------------------------
+                # Logging
+                # ------------------------------------------------
+
+                if (
+                    ENABLE_RUN_LOG
+                    and telemetry_interval is not None
+                    and current_time - last_telemetry_time
+                        >= telemetry_interval
+                ):
+                    last_telemetry_time = current_time
+
+                    speed = math.hypot(
+                        velocity_x,
+                        velocity_y,
+                    )
+
+                    logger.debug(
+                        "PHYSICS | "
+                        "cursor=(%.1f, %.1f) | "
+                        "target=(%.1f, %.1f) | "
+                        "distance=%.2f | "
+                        "gravity=%.2f | "
+                        "velocity=(%.2f, %.2f) | "
+                        "speed=%.2f | "
+                        "user_input=(%.2f, %.2f) | "
+                        "radial_input=%.2f | "
+                        "tangential_input=%.2f | "
+                        "boost=%s",
+                        actual_x,
+                        actual_y,
+                        target_x,
+                        target_y,
+                        distance,
+                        gravity_strength,
+                        velocity_x,
+                        velocity_y,
+                        speed,
+                        user_dx,
+                        user_dy,
+                        radial_input,
+                        tangential_input,
+                        boost_active,
+                    )
 
                 # ------------------------------------------------
                 # Virtual desktop edge collisions
@@ -728,12 +978,24 @@ def gravity_loop():
                     new_x = SCREEN_LEFT
 
                     if velocity_x < 0:
+                        logger.info(
+                            "COLLISION | wall=LEFT | "
+                            "lost_velocity_x=%.2f",
+                            velocity_x,
+                        )
+
                         velocity_x = 0.0
 
                 elif new_x >= SCREEN_RIGHT:
                     new_x = SCREEN_RIGHT
 
                     if velocity_x > 0:
+                        logger.info(
+                            "COLLISION | wall=RIGHT | "
+                            "lost_velocity_x=%.2f",
+                            velocity_x,
+                        )
+
                         velocity_x = 0.0
 
 
@@ -741,12 +1003,24 @@ def gravity_loop():
                     new_y = SCREEN_TOP
 
                     if velocity_y < 0:
+                        logger.info(
+                            "COLLISION | wall=TOP | "
+                            "lost_velocity_y=%.2f",
+                            velocity_y,
+                        )
+
                         velocity_y = 0.0
 
                 elif new_y >= SCREEN_BOTTOM:
                     new_y = SCREEN_BOTTOM
 
                     if velocity_y > 0:
+                        logger.info(
+                            "COLLISION | wall=BOTTOM | "
+                            "lost_velocity_y=%.2f",
+                            velocity_y,
+                        )
+
                         velocity_y = 0.0
 
 
@@ -786,6 +1060,11 @@ def main():
     """
     global tray_icon
     global listener
+
+    log_path = setup_logging()
+    if ENABLE_RUN_LOG:
+        log_configuration()
+        print(f"Logging to: {log_path}")
 
     print("Mouse Gravity started. Double click to set a target, single click to toggle lateral boost, quadruple click to exit.")
     listener = mouse.Listener(
@@ -832,6 +1111,8 @@ def main():
         if listener is not None:
             listener.stop()
             listener.join(timeout=1)
+
+        logger.info("SHUTDOWN | complete")
 
         print("Mouse Gravity stopped.")
 

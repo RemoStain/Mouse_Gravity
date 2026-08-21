@@ -28,7 +28,7 @@ The mouse controls are based on click count.
 | --- | --- |
 | Single click | Toggle lateral boost on or off |
 | Double click | Assign a new gravity target |
-| Triple click | No action |
+| Triple click | Remove target and velocity |
 | Quadruple click | Exit the program |
 
 Click sequences are recognized within a configurable timeout.
@@ -59,7 +59,7 @@ For example:
 
 ```python
 TOWARD_INPUT_MULTIPLIER = 1.0
-AWAY_INPUT_MULTIPLIER = 0.3
+AWAY_INPUT_MULTIPLIER = 0.35
 ```
 
 With those values, outward physical movement contributes only 30% as much radial momentum as inward movement.
@@ -129,7 +129,8 @@ Once started:
 4. Single-click to enable lateral boost.
 5. Move sideways relative to the target to add orbital momentum.
 6. Single-click again to disable lateral boost.
-7. Quadruple-click to terminate the program.
+7. Triple-click to remove the target and stop movement.
+8. Quadruple-click to terminate the program.
 
 You can also right-click the tray icon and choose **Exit**.
 
@@ -152,19 +153,26 @@ Most behavior is controlled by constants near the top of the script.
 A balanced starting configuration is:
 
 ```python
-GRAVITY = 1800.0
+GRAVITY = 1200.0
 
-MAX_SPEED = 1800.0
-DRAG = 0.992
-STOP_RADIUS = 3.0
+REFERENCE_DISTANCE = 300.0
+GRAVITY_DISTANCE_POWER = 1.25
+
+MIN_GRAVITY_DISTANCE = 40.0
+MAX_GRAVITY_ACCELERATION = 5000.0
+
+
+MAX_SPEED = 2000.0
+DRAG = 0.996
+STOP_RADIUS = 5.0
 FPS = 120
 
-NORMAL_INPUT_STRENGTH = 25.0
+NORMAL_INPUT_STRENGTH = 10.0
 
 TOWARD_INPUT_MULTIPLIER = 1.0
-AWAY_INPUT_MULTIPLIER = 0.3
+AWAY_INPUT_MULTIPLIER = 0.35
 
-LATERAL_BOOST_MULTIPLIER = 4.0
+LATERAL_BOOST_MULTIPLIER = 2.0
 
 CLICK_SEQUENCE_TIMEOUT = 0.35
 ```

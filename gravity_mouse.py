@@ -97,7 +97,7 @@ listener = None  # Mouse listener object for detecting mouse clicks, or None if 
 # Logging settings
 # ------------------------------------------------------------
 
-LOGGING_ENABLED_BY_DEFAULT = False
+LOGGING_ENABLED_BY_DEFAULT = True
 
 # Number of physics snapshots written per second.
 LOG_TELEMETRY_HZ = 10

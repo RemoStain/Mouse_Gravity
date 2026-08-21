@@ -3,6 +3,8 @@ import threading
 import time
 
 import logging
+import os
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -11,19 +13,6 @@ from pynput import mouse
 import pystray
 
 import ctypes
-
-
-# ------------------------------------------------------------
-# Developer logging
-# ------------------------------------------------------------
-
-ENABLE_RUN_LOG = True
-
-# Number of physics-state snapshots written per second.
-# Events such as clicks, target changes, boost toggles,
-# wall collisions, and shutdowns are always logged immediately.
-LOG_TELEMETRY_HZ = 10
-
 
 # ------------------------------------------------------------
 # Physics settings
@@ -43,47 +32,90 @@ STOP_RADIUS = 5.0
 FPS = 120
 
 # How strongly actual mouse movement affects orbital momentum
-TOWARD_INPUT_MULTIPLIER = 1.0   # pixels per second per pixel of user input toward the target
-AWAY_INPUT_MULTIPLIER = 0.35    # pixels per second per pixel of user input away from the target
+TOWARD_INPUT_MULTIPLIER = (
+    1.0  # pixels per second per pixel of user input toward the target
+)
+AWAY_INPUT_MULTIPLIER = (
+    0.35  # pixels per second per pixel of user input away from the target
+)
 
-LATERAL_BOOST_MULTIPLIER = 2.0  # pixels per second per pixel of user input perpendicular to the target
-NORMAL_INPUT_STRENGTH = 10.0    # pixels per second per pixel of user input in any direction
+LATERAL_BOOST_MULTIPLIER = (
+    2.0  # pixels per second per pixel of user input perpendicular to the target
+)
+NORMAL_INPUT_STRENGTH = (
+    10.0  # pixels per second per pixel of user input in any direction
+)
 
 
 # ------------------------------------------------------------
 # Click settings
 # ------------------------------------------------------------
 
-CLICK_SEQUENCE_TIMEOUT = 0.35   # seconds
+CLICK_SEQUENCE_TIMEOUT = 0.35  # seconds
 
 
 # ------------------------------------------------------------
 # Shared state
 # ------------------------------------------------------------
 
-target = None           # (x, y) tuple of the current gravity target, or None if no target is set
+target = None  # (x, y) tuple of the current gravity target, or None if no target is set
 
-velocity_x = 0.0        # pixels per second, horizontal component of the cursor's velocity
-velocity_y = 0.0        # pixels per second, vertical component of the cursor's velocity
+velocity_x = 0.0  # pixels per second, horizontal component of the cursor's velocity
+velocity_y = 0.0  # pixels per second, vertical component of the cursor's velocity
 
-lateral_boost = False   # True if lateral boost is active, False otherwise
-orbit_direction = 1     # 1 for clockwise, -1 for counterclockwise, 0 if no orbit direction is set
+lateral_boost = False  # True if lateral boost is active, False otherwise
+orbit_direction = (
+    1  # 1 for clockwise, -1 for counterclockwise, 0 if no orbit direction is set
+)
 
-click_count = 0         # Number of clicks detected in the current click sequence
-last_click_time = 0.0   # Time of the last click in the current click sequence
-click_timer = None      # Timer object for the current click sequence, or None if no timer is active
+click_count = 0  # Number of clicks detected in the current click sequence
+last_click_time = 0.0  # Time of the last click in the current click sequence
+click_timer = (
+    None  # Timer object for the current click sequence, or None if no timer is active
+)
 
-click_lock = threading.Lock()   # Lock for synchronizing access to click_count, last_click_time, and click_timer
-state_lock = threading.Lock()   # Lock for synchronizing access to target, velocity_x, velocity_y, lateral_boost, and orbit_direction
+click_lock = (
+    threading.Lock()
+)  # Lock for synchronizing access to click_count, last_click_time, and click_timer
+state_lock = (
+    threading.Lock()
+)  # Lock for synchronizing access to target, velocity_x, velocity_y, lateral_boost, and orbit_direction
 
-running = threading.Event()     # Event to signal whether the program is running or should exit
-running.set()                   # Set the running event to True to indicate that the program is running
+running = (
+    threading.Event()
+)  # Event to signal whether the program is running or should exit
+running.set()  # Set the running event to True to indicate that the program is running
 
-controller = mouse.Controller() # Controller object for controlling the mouse cursor
+controller = mouse.Controller()  # Controller object for controlling the mouse cursor
 
-tray_icon = None                # Tray icon object for the system tray, or None if no tray icon is created
-listener = None                 # Mouse listener object for detecting mouse clicks, or None if no listener is created
+tray_icon = (
+    None  # Tray icon object for the system tray, or None if no tray icon is created
+)
+listener = None  # Mouse listener object for detecting mouse clicks, or None if no listener is created
 
+# ------------------------------------------------------------
+# Logging settings
+# ------------------------------------------------------------
+
+LOGGING_ENABLED_BY_DEFAULT = False
+
+# Number of physics snapshots written per second.
+LOG_TELEMETRY_HZ = 10
+
+
+# ------------------------------------------------------------
+# Logging state
+# ------------------------------------------------------------
+
+logging_enabled = False
+log_handler = None
+log_path = None
+
+logging_lock = threading.Lock()
+
+logger = logging.getLogger("mouse_gravity")
+logger.setLevel(logging.DEBUG)
+logger.propagate = False
 
 
 # ------------------------------------------------------------
@@ -113,61 +145,78 @@ print(
 )
 
 
-
 # ------------------------------------------------------------
 # Logging
 # ------------------------------------------------------------
 
-logger = logging.getLogger("mouse_gravity")
-logger.setLevel(logging.DEBUG)
 
-logger.propagate = False
-
-
-def setup_logging():
+def get_log_directory():
     """
-    Create a timestamped log file for this run.
-
-    Returns:
-        Path | None:
-            Path to the log file when logging is enabled,
-            otherwise None.
+    Return the directory where Mouse Gravity logs are stored.
     """
-    if not ENABLE_RUN_LOG:
-        logger.disabled = True
-        return None
+    return Path(__file__).resolve().parent
 
-    logger.disabled = False
 
-    timestamp = datetime.now().strftime(
-        "%Y-%m-%d_%H-%M-%S"
-    )
+def start_logging():
+    global logging_enabled
+    global log_handler
+    global log_path
 
-    log_path = (
-        Path(__file__).resolve().parent
-        / f"logs/mouse_gravity_{timestamp}.log"
-    )
+    with logging_lock:
+        if log_handler is not None:
+            return
 
-    handler = logging.FileHandler(
-        log_path,
-        encoding="utf-8",
-    )
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    handler.setLevel(logging.DEBUG)
+        log_path = get_log_directory() / f"logs/mouse_gravity_{timestamp}.log"
 
-    formatter = logging.Formatter(
-        "%(asctime)s.%(msecs)03d | "
-        "%(levelname)-8s | "
-        "%(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+        log_handler = logging.FileHandler(
+            log_path,
+            encoding="utf-8",
+        )
 
-    handler.setFormatter(formatter)
+        log_handler.setLevel(logging.DEBUG)
 
-    logger.handlers.clear()
-    logger.addHandler(handler)
+        formatter = logging.Formatter(
+            "%(asctime)s.%(msecs)03d | " "%(levelname)-8s | " "%(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
 
-    return log_path
+        log_handler.setFormatter(formatter)
+
+        logger.addHandler(log_handler)
+
+        logging_enabled = True
+
+    logger.info("LOGGING | enabled")
+
+    log_configuration()
+
+    print(f"Logging enabled: {log_path}")
+
+
+def stop_logging():
+    global logging_enabled
+    global log_handler
+
+    with logging_lock:
+        if log_handler is None:
+            logging_enabled = False
+            return
+
+        logger.info("LOGGING | disabled")
+
+        handler = log_handler
+
+        log_handler = None
+        logging_enabled = False
+
+        logger.removeHandler(handler)
+
+        handler.flush()
+        handler.close()
+
+    print("Logging disabled.")
 
 
 def log_configuration():
@@ -191,11 +240,7 @@ def log_configuration():
     )
 
     logger.info(
-        "CONFIG | "
-        "MAX_SPEED=%s | "
-        "DRAG=%s | "
-        "STOP_RADIUS=%s | "
-        "FPS=%s",
+        "CONFIG | " "MAX_SPEED=%s | " "DRAG=%s | " "STOP_RADIUS=%s | " "FPS=%s",
         MAX_SPEED,
         DRAG,
         STOP_RADIUS,
@@ -215,9 +260,7 @@ def log_configuration():
     )
 
     logger.info(
-        "CONFIG | "
-        "CLICK_SEQUENCE_TIMEOUT=%s | "
-        "LOG_TELEMETRY_HZ=%s",
+        "CONFIG | " "CLICK_SEQUENCE_TIMEOUT=%s | " "LOG_TELEMETRY_HZ=%s",
         CLICK_SEQUENCE_TIMEOUT,
         LOG_TELEMETRY_HZ,
     )
@@ -239,10 +282,10 @@ def log_configuration():
     )
 
 
-
 # ------------------------------------------------------------
 # Tray icon
 # ------------------------------------------------------------
+
 
 def create_vortex_icon(size=64, boost_active=False):
     """
@@ -274,15 +317,9 @@ def create_vortex_icon(size=64, boost_active=False):
         for i in range(120):
             t = i / 119
 
-            angle = (
-                arm_offset
-                + t * math.pi * 3.5
-            )
+            angle = arm_offset + t * math.pi * 3.5
 
-            radius = (
-                size * 0.42 * (1 - t)
-                + 2
-            )
+            radius = size * 0.42 * (1 - t) + 2
 
             x = center_x + math.cos(angle) * radius
             y = center_y + math.sin(angle) * radius
@@ -338,7 +375,6 @@ def create_vortex_icon(size=64, boost_active=False):
             fill=badge_background,
         )
 
-
         # --------------------------------------------------------
         # Badge dimensions
         # --------------------------------------------------------
@@ -347,7 +383,6 @@ def create_vortex_icon(size=64, boost_active=False):
         badge_height = box_bottom - box_top
 
         center_x = box_left + badge_width / 2
-
 
         # --------------------------------------------------------
         # Arrow proportions
@@ -363,43 +398,21 @@ def create_vortex_icon(size=64, boost_active=False):
 
         ARROW_SHAFT_WIDTH = 0.30
 
-
         # --------------------------------------------------------
         # Calculate arrow dimensions
         # --------------------------------------------------------
 
-        arrow_top = (
-            box_top
-            + badge_height * ARROW_TOP_MARGIN
-        )
+        arrow_top = box_top + badge_height * ARROW_TOP_MARGIN
 
-        arrow_bottom = (
-            box_bottom
-            - badge_height * ARROW_BOTTOM_MARGIN
-        )
+        arrow_bottom = box_bottom - badge_height * ARROW_BOTTOM_MARGIN
 
-        head_half_width = (
-            badge_width
-            * ARROW_HEAD_WIDTH
-            / 2
-        )
+        head_half_width = badge_width * ARROW_HEAD_WIDTH / 2
 
-        head_height = (
-            badge_height
-            * ARROW_HEAD_HEIGHT
-        )
+        head_height = badge_height * ARROW_HEAD_HEIGHT
 
-        shaft_half_width = (
-            badge_width
-            * ARROW_SHAFT_WIDTH
-            / 2
-        )
+        shaft_half_width = badge_width * ARROW_SHAFT_WIDTH / 2
 
-        head_bottom = (
-            arrow_top
-            + head_height
-        )
-
+        head_bottom = arrow_top + head_height
 
         # --------------------------------------------------------
         # Arrow
@@ -411,37 +424,31 @@ def create_vortex_icon(size=64, boost_active=False):
                 center_x,
                 arrow_top,
             ),
-
             # Right side of arrowhead
             (
                 center_x + head_half_width,
                 head_bottom,
             ),
-
             # Right shoulder
             (
                 center_x + shaft_half_width,
                 head_bottom,
             ),
-
             # Bottom-right shaft
             (
                 center_x + shaft_half_width,
                 arrow_bottom,
             ),
-
             # Bottom-left shaft
             (
                 center_x - shaft_half_width,
                 arrow_bottom,
             ),
-
             # Left shoulder
             (
                 center_x - shaft_half_width,
                 head_bottom,
             ),
-
             # Left side of arrowhead
             (
                 center_x - head_half_width,
@@ -460,6 +467,26 @@ def create_vortex_icon(size=64, boost_active=False):
         )
     return image
 
+
+def toggle_logging(icon, item):
+    if logging_enabled:
+        stop_logging()
+    else:
+        start_logging()
+
+    icon.update_menu()
+
+
+def open_log_folder(icon, item):
+    """
+    Open the directory containing Mouse Gravity logs
+    in Windows File Explorer.
+    """
+    log_directory = get_log_directory()
+
+    os.startfile(log_directory)
+
+
 def update_tray_status():
     """
     Update the tray icon's title and icon based on the current boost state.
@@ -472,26 +499,24 @@ def update_tray_status():
 
     boost_state = "ON" if boost_active else "OFF"
 
-    tray_icon.title = (
-        f"Mouse Gravity: ACTIVE | Boost: {boost_state}"
-    )
+    tray_icon.title = f"Mouse Gravity: ACTIVE | Boost: {boost_state}"
 
-    tray_icon.icon = create_vortex_icon(
-        boost_active=boost_active
-    )
+    tray_icon.icon = create_vortex_icon(boost_active=boost_active)
+
 
 # ------------------------------------------------------------
 # Shutdown
 # ------------------------------------------------------------
 
+
 def shutdown():
-    """
-    Shutdown the program by stopping the running event, canceling any active click timer,
-    and stopping the tray icon.
-    """
     global click_timer
 
-    logger.info("SHUTDOWN | beginning shutdown")
+    if not running.is_set():
+        return
+
+    if logging_enabled:
+        logger.info("SHUTDOWN | beginning shutdown")
 
     running.clear()
 
@@ -518,6 +543,7 @@ def tray_exit(icon, item):
 # ------------------------------------------------------------
 # Click handling
 # ------------------------------------------------------------
+
 
 def process_click_sequence(x, y):
     """
@@ -566,7 +592,6 @@ def process_click_sequence(x, y):
 
         update_tray_status()
 
-
     # --------------------------------------------------------
     # Double click
     #
@@ -599,20 +624,12 @@ def process_click_sequence(x, y):
             tangent_x = -radial_y
             tangent_y = radial_x
 
-            tangent_velocity = (
-                velocity_x * tangent_x
-                + velocity_y * tangent_y
-            )
+            tangent_velocity = velocity_x * tangent_x + velocity_y * tangent_y
 
             with state_lock:
-                orbit_direction = (
-                    -1
-                    if tangent_velocity < 0
-                    else 1
-                )
+                orbit_direction = -1 if tangent_velocity < 0 else 1
 
         print(f"New target: {(x, y)}")
-
 
     # --------------------------------------------------------
     # Triple click
@@ -627,9 +644,7 @@ def process_click_sequence(x, y):
         velocity_y = 0.0
         orbit_direction = 0
 
-        logger.info(
-            "REMOVE TARGET | triple click detected"
-        )
+        logger.info("REMOVE TARGET | triple click detected")
 
         print("Target removed.")
 
@@ -685,17 +700,17 @@ def on_click(x, y, button, pressed):
     # shutdown() must happen AFTER releasing click_lock.
     if should_exit:
 
-        logger.info(
-            "EXIT | quadruple click detected"
-        )
+        logger.info("EXIT | quadruple click detected")
 
         print("Quadruple click detected. Exiting.")
         shutdown()
         return False
 
+
 # ------------------------------------------------------------
 # Mouse physics
 # ------------------------------------------------------------
+
 
 def gravity_loop():
     """
@@ -708,11 +723,6 @@ def gravity_loop():
 
     previous_time = time.perf_counter()
 
-    # Position where the program most recently placed the cursor.
-    #
-    # Any difference between this position and the actual cursor
-    # position at the beginning of the next frame is treated as
-    # physical/user mouse input.
     expected_x, expected_y = controller.position
 
     telemetry_interval = (
@@ -721,7 +731,7 @@ def gravity_loop():
         else None
     )
 
-    last_telemetry_time = 0.0
+    last_telemetry_time = time.perf_counter()
 
 
     while running.is_set():
@@ -737,7 +747,6 @@ def gravity_loop():
             current_target = target
             boost_active = lateral_boost
 
-
         # ----------------------------------------------------
         # Detect physical mouse input
         # ----------------------------------------------------
@@ -746,7 +755,6 @@ def gravity_loop():
 
         user_dx = actual_x - expected_x
         user_dy = actual_y - expected_y
-
 
         if current_target is not None:
 
@@ -757,12 +765,10 @@ def gravity_loop():
 
             distance = math.hypot(dx, dy)
 
-
             if distance > STOP_RADIUS:
 
                 radial_x = dx / distance
                 radial_y = dy / distance
-
 
                 # ------------------------------------------------
                 # Distance-dependent gravity
@@ -778,8 +784,7 @@ def gravity_loop():
 
                 gravity_strength = (
                     GRAVITY
-                    * (REFERENCE_DISTANCE / gravity_distance)
-                    ** GRAVITY_DISTANCE_POWER
+                    * (REFERENCE_DISTANCE / gravity_distance) ** GRAVITY_DISTANCE_POWER
                 )
 
                 gravity_strength = min(
@@ -793,7 +798,6 @@ def gravity_loop():
                 velocity_x += acceleration_x * dt
                 velocity_y += acceleration_y * dt
 
-
                 # ------------------------------------------------
                 # User movement
                 # ------------------------------------------------
@@ -806,7 +810,6 @@ def gravity_loop():
                 tangent_x = -radial_y
                 tangent_y = radial_x
 
-
                 # ------------------------------------------------
                 # Split physical mouse movement into:
                 #
@@ -814,16 +817,9 @@ def gravity_loop():
                 # 2. tangential movement
                 # ------------------------------------------------
 
-                radial_input = (
-                    user_dx * radial_x
-                    + user_dy * radial_y
-                )
+                radial_input = user_dx * radial_x + user_dy * radial_y
 
-                tangential_input = (
-                    user_dx * tangent_x
-                    + user_dy * tangent_y
-                )
-
+                tangential_input = user_dx * tangent_x + user_dy * tangent_y
 
                 # ------------------------------------------------
                 # Radial input
@@ -835,30 +831,14 @@ def gravity_loop():
                 # ------------------------------------------------
 
                 if radial_input >= 0:
-                    radial_strength = (
-                        NORMAL_INPUT_STRENGTH
-                        * TOWARD_INPUT_MULTIPLIER
-                    )
+                    radial_strength = NORMAL_INPUT_STRENGTH * TOWARD_INPUT_MULTIPLIER
 
                 else:
-                    radial_strength = (
-                        NORMAL_INPUT_STRENGTH
-                        * AWAY_INPUT_MULTIPLIER
-                    )
+                    radial_strength = NORMAL_INPUT_STRENGTH * AWAY_INPUT_MULTIPLIER
 
+                velocity_x += radial_x * radial_input * radial_strength
 
-                velocity_x += (
-                    radial_x
-                    * radial_input
-                    * radial_strength
-                )
-
-                velocity_y += (
-                    radial_y
-                    * radial_input
-                    * radial_strength
-                )
-
+                velocity_y += radial_y * radial_input * radial_strength
 
                 # ------------------------------------------------
                 # Tangential input
@@ -872,19 +852,9 @@ def gravity_loop():
                 if boost_active:
                     tangential_strength *= LATERAL_BOOST_MULTIPLIER
 
+                velocity_x += tangent_x * tangential_input * tangential_strength
 
-                velocity_x += (
-                    tangent_x
-                    * tangential_input
-                    * tangential_strength
-                )
-
-                velocity_y += (
-                    tangent_y
-                    * tangential_input
-                    * tangential_strength
-                )
-
+                velocity_y += tangent_y * tangential_input * tangential_strength
 
                 # ------------------------------------------------
                 # Drag
@@ -892,7 +862,6 @@ def gravity_loop():
 
                 velocity_x *= DRAG
                 velocity_y *= DRAG
-
 
                 # ------------------------------------------------
                 # Maximum speed
@@ -910,30 +879,22 @@ def gravity_loop():
                     velocity_x *= scale
                     velocity_y *= scale
 
-
                 # ------------------------------------------------
                 # Proposed movement
                 # ------------------------------------------------
 
-                new_x = (
-                    actual_x
-                    + velocity_x * dt
-                )
+                new_x = actual_x + velocity_x * dt
 
-                new_y = (
-                    actual_y
-                    + velocity_y * dt
-                )
+                new_y = actual_y + velocity_y * dt
 
                 # ------------------------------------------------
                 # Logging
                 # ------------------------------------------------
 
                 if (
-                    ENABLE_RUN_LOG
+                    logging_enabled
                     and telemetry_interval is not None
-                    and current_time - last_telemetry_time
-                        >= telemetry_interval
+                    and current_time - last_telemetry_time >= telemetry_interval
                 ):
                     last_telemetry_time = current_time
 
@@ -979,8 +940,7 @@ def gravity_loop():
 
                     if velocity_x < 0:
                         logger.info(
-                            "COLLISION | wall=LEFT | "
-                            "lost_velocity_x=%.2f",
+                            "COLLISION | wall=LEFT | " "lost_velocity_x=%.2f",
                             velocity_x,
                         )
 
@@ -991,21 +951,18 @@ def gravity_loop():
 
                     if velocity_x > 0:
                         logger.info(
-                            "COLLISION | wall=RIGHT | "
-                            "lost_velocity_x=%.2f",
+                            "COLLISION | wall=RIGHT | " "lost_velocity_x=%.2f",
                             velocity_x,
                         )
 
                         velocity_x = 0.0
-
 
                 if new_y <= SCREEN_TOP:
                     new_y = SCREEN_TOP
 
                     if velocity_y < 0:
                         logger.info(
-                            "COLLISION | wall=TOP | "
-                            "lost_velocity_y=%.2f",
+                            "COLLISION | wall=TOP | " "lost_velocity_y=%.2f",
                             velocity_y,
                         )
 
@@ -1016,13 +973,11 @@ def gravity_loop():
 
                     if velocity_y > 0:
                         logger.info(
-                            "COLLISION | wall=BOTTOM | "
-                            "lost_velocity_y=%.2f",
+                            "COLLISION | wall=BOTTOM | " "lost_velocity_y=%.2f",
                             velocity_y,
                         )
 
                         velocity_y = 0.0
-
 
                 controller.position = (
                     round(new_x),
@@ -1030,7 +985,6 @@ def gravity_loop():
                 )
 
                 expected_x, expected_y = controller.position
-
 
             else:
 
@@ -1041,16 +995,16 @@ def gravity_loop():
 
                 expected_x, expected_y = controller.position
 
-
         else:
             expected_x, expected_y = controller.position
 
-
         time.sleep(1 / FPS)
+
 
 # ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
+
 
 def main():
     """
@@ -1061,18 +1015,15 @@ def main():
     global tray_icon
     global listener
 
-    log_path = setup_logging()
-    if ENABLE_RUN_LOG:
-        log_configuration()
-        print(f"Logging to: {log_path}")
+    if LOGGING_ENABLED_BY_DEFAULT:
+        start_logging()
 
-    print("Mouse Gravity started. Double click to set a target, single click to toggle lateral boost, quadruple click to exit.")
-    listener = mouse.Listener(
-        on_click=on_click
+    print(
+        "Mouse Gravity started. \nSingle click to toggle lateral boost \nDouble click to set a target \nTriple click to remove target \nQuadruple click to exit."
     )
+    listener = mouse.Listener(on_click=on_click)
 
     listener.start()
-
 
     physics_thread = threading.Thread(
         target=gravity_loop,
@@ -1080,7 +1031,6 @@ def main():
     )
 
     physics_thread.start()
-
 
     tray_icon = pystray.Icon(
         "mouse_gravity",
@@ -1094,25 +1044,35 @@ def main():
             ),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
+                "Enable Logging",
+                toggle_logging,
+                checked=lambda item: logging_enabled,
+            ),
+            pystray.MenuItem(
+                "Open Log Folder",
+                open_log_folder,
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
                 "Exit",
                 tray_exit,
             ),
         ),
     )
 
-
     try:
         tray_icon.run()
 
     finally:
-
         running.clear()
 
         if listener is not None:
             listener.stop()
             listener.join(timeout=1)
 
-        logger.info("SHUTDOWN | complete")
+        if logging_enabled:
+            logger.info("SHUTDOWN | complete")
+            stop_logging()
 
         print("Mouse Gravity stopped.")
 

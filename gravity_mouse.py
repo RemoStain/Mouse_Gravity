@@ -1,19 +1,28 @@
-import math
-import threading
-import time
+import ctypes
+
+try:
+    ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+except Exception:
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        ctypes.windll.user32.SetProcessDPIAware()
+
 
 import logging
+import math
 import os
 import threading
+import time
+import tkinter as tk
+
 from datetime import datetime
 from pathlib import Path
 
-from PIL import Image, ImageDraw
-from pynput import mouse
 import pystray
 
-import ctypes
-import tkinter as tk
+from PIL import Image, ImageDraw
+from pynput import mouse
 
 from config import config
 from settings_window import SettingsWindow
@@ -27,15 +36,15 @@ target = None  # (x, y) tuple of the current gravity target, or None if no targe
 velocity_x = 0.0  # pixels per second, horizontal component of the cursor's velocity
 velocity_y = 0.0  # pixels per second, vertical component of the cursor's velocity
 
-lateral_boost = False  # True if lateral boost is active, False otherwise
+lateral_boost = config.lateral_boost_enabled_by_default
 orbit_direction = (
-    1  # 1 for clockwise, -1 for counterclockwise, 0 if no orbit direction is set
+    1  # 1 for clockwise, -1 for counterclockwise, 0 if no direction is set
 )
 
 click_count = 0  # Number of clicks detected in the current click sequence
 last_click_time = 0.0  # Time of the last click in the current click sequence
 click_timer = (
-    None  # Timer object for the current click sequence, or None if no timer is active
+    None  # Timer object for the current click sequence, or None if none is active
 )
 
 click_lock = (
@@ -214,11 +223,7 @@ def log_configuration():
     )
 
     logger.info(
-        "CONFIG | "
-        "max_speed=%s | "
-        "drag=%s | "
-        "stop_radius=%s | "
-        "fps=%s",
+        "CONFIG | " "max_speed=%s | " "drag=%s | " "stop_radius=%s | " "fps=%s",
         config.max_speed,
         config.drag,
         config.stop_radius,
@@ -236,6 +241,7 @@ def log_configuration():
         config.away_input_multiplier,
         config.lateral_boost_multiplier,
     )
+
 
 # ------------------------------------------------------------
 # Tray icon
@@ -423,14 +429,13 @@ def create_vortex_icon(size=64, boost_active=False):
     return image
 
 
-
 def toggle_logging(icon, item):
     """
     Toggle logging on or off from the tray menu.
 
     pystray callbacks may occur outside tkinter's thread,
     so the logging operation is scheduled through root.after().
-    
+
     Args:
         icon (pystray.Icon): The tray icon instance.
         item (pystray.MenuItem): The menu item that triggered the toggle action.
@@ -440,6 +445,35 @@ def toggle_logging(icon, item):
     else:
         start_logging()
 
+    icon.update_menu()
+
+
+def toggle_lateral_boost(icon, item):
+    """
+    Toggle lateral boost on or off from the tray menu.
+
+    pystray callbacks may occur outside tkinter's thread,
+    so the boost toggle operation is scheduled through root.after().
+
+    Args:
+        icon (pystray.Icon): The tray icon instance.
+        item (pystray.MenuItem): The menu item that triggered the toggle action.
+    """
+    global lateral_boost
+
+    with state_lock:
+        lateral_boost = not lateral_boost
+        boost_active = lateral_boost
+
+    if logging_enabled:
+        logger.info(
+            "BOOST | state=%s | source=tray",
+            "ON" if boost_active else "OFF",
+        )
+
+    update_tray_status()
+
+    # Refresh the checkmark in the tray menu.
     icon.update_menu()
 
 
@@ -485,6 +519,7 @@ def show_settings_window(icon=None, item=None):
         settings_ui.show,
     )
 
+
 # ------------------------------------------------------------
 # Shutdown
 # ------------------------------------------------------------
@@ -503,12 +538,9 @@ def shutdown():
         return
 
     if logging_enabled:
-        logger.info(
-            "SHUTDOWN | beginning shutdown"
-        )
+        logger.info("SHUTDOWN | beginning shutdown")
 
     running.clear()
-
 
     # Cancel pending click recognition
     with click_lock:
@@ -516,11 +548,9 @@ def shutdown():
             click_timer.cancel()
             click_timer = None
 
-
     # Stop tray icon
     if tray_icon is not None:
         tray_icon.stop()
-
 
     # End tkinter mainloop
     if tk_root is not None:
@@ -545,9 +575,7 @@ def tray_exit(icon, item):
         item (pystray.MenuItem): The menu item that triggered the exit action.
     """
     if logging_enabled:
-        logger.info(
-            "EXIT | tray menu"
-        )
+        logger.info("EXIT | tray menu")
 
     shutdown()
 
@@ -587,30 +615,13 @@ def process_click_sequence(x, y):
     # Toggle lateral boost.
     # --------------------------------------------------------
 
-    if count == 1:
-
-        with state_lock:
-            lateral_boost = not lateral_boost
-            boost_state = lateral_boost
-
-        state = "ON" if boost_state else "OFF"
-
-        print(f"Lateral boost: {state}")
-
-        logger.info(
-            "BOOST | state=%s",
-            state,
-        )
-
-        update_tray_status()
-
     # --------------------------------------------------------
     # Double click
     #
     # Assign a new gravity target.
     # --------------------------------------------------------
 
-    elif count == 2:
+    if count == 2:
 
         with state_lock:
             target = (x, y)
@@ -629,7 +640,6 @@ def process_click_sequence(x, y):
         distance = math.hypot(dx, dy)
 
         if distance > 0:
-
             radial_x = dx / distance
             radial_y = dy / distance
 
@@ -651,7 +661,7 @@ def process_click_sequence(x, y):
 
     elif count == 3:
 
-        target = None
+        target = None  # (600, 0)
         velocity_x = 0.0
         velocity_y = 0.0
         orbit_direction = 0
@@ -739,9 +749,7 @@ def gravity_loop():
     expected_x, expected_y = controller.position
 
     telemetry_interval = (
-        1.0 / config.log_telemetry_hz
-        if config.log_telemetry_hz > 0
-        else None
+        1.0 / config.log_telemetry_hz if config.log_telemetry_hz > 0 else None
     )
 
     last_telemetry_time = time.perf_counter()
@@ -808,7 +816,8 @@ def gravity_loop():
                 # Calculate the gravity strength based on the distance to the target.
                 gravity_strength = (
                     config.gravity
-                    * (config.reference_distance / gravity_distance) ** config.gravity_distance_power
+                    * (config.reference_distance / gravity_distance)
+                    ** config.gravity_distance_power
                 )
 
                 # Clamp the gravity strength to a maximum value to prevent excessive acceleration.
@@ -858,10 +867,14 @@ def gravity_loop():
                 # ------------------------------------------------
 
                 if radial_input >= 0:
-                    radial_strength = config.normal_input_strength * config.toward_input_multiplier
+                    radial_strength = (
+                        config.normal_input_strength * config.toward_input_multiplier
+                    )
 
                 else:
-                    radial_strength = config.normal_input_strength * config.away_input_multiplier
+                    radial_strength = (
+                        config.normal_input_strength * config.away_input_multiplier
+                    )
 
                 velocity_x += radial_x * radial_input * radial_strength
 
@@ -1058,7 +1071,6 @@ def main():
     if config.logging_enabled_by_default:
         start_logging()
 
-
     # --------------------------------------------------------
     # Mouse listener
     # --------------------------------------------------------
@@ -1068,7 +1080,6 @@ def main():
     )
 
     listener.start()
-
 
     # --------------------------------------------------------
     # Physics thread
@@ -1082,7 +1093,6 @@ def main():
 
     physics_thread.start()
 
-
     # --------------------------------------------------------
     # Tkinter root
     # --------------------------------------------------------
@@ -1094,7 +1104,6 @@ def main():
     # managed by SettingsWindow.
     tk_root.withdraw()
 
-
     # --------------------------------------------------------
     # Settings window
     # --------------------------------------------------------
@@ -1105,76 +1114,65 @@ def main():
         logger=logger,
     )
 
-
     # --------------------------------------------------------
     # Tray icon
     # --------------------------------------------------------
 
     tray_icon = pystray.Icon(
         "mouse_gravity",
-
         create_vortex_icon(
             boost_active=False,
         ),
-
         "Mouse Gravity: ACTIVE | Boost: OFF",
-
         menu=pystray.Menu(
-
             # ------------------------------------------------
             # Status
             # ------------------------------------------------
-
             pystray.MenuItem(
                 "Mouse Gravity: ACTIVE",
                 lambda icon, item: None,
                 enabled=False,
             ),
-
             pystray.Menu.SEPARATOR,
-
-
+            # ------------------------------------------------
+            # Lateral Boost
+            # ------------------------------------------------
+            pystray.MenuItem(
+                "Lateral Boost",
+                toggle_lateral_boost,
+                checked=lambda item: lateral_boost,
+            ),
+            pystray.Menu.SEPARATOR,
             # ------------------------------------------------
             # Settings
             # ------------------------------------------------
-
             pystray.MenuItem(
                 "Open Settings",
                 show_settings_window,
             ),
-
             pystray.Menu.SEPARATOR,
-
-
             # ------------------------------------------------
             # Logging
             # ------------------------------------------------
-
             pystray.MenuItem(
                 "Enable Logging",
                 toggle_logging,
                 checked=lambda item: logging_enabled,
             ),
-
             pystray.MenuItem(
                 "Open Log Folder",
                 open_log_folder,
             ),
-
             pystray.Menu.SEPARATOR,
-
-
             # ------------------------------------------------
             # Exit
             # ------------------------------------------------
-
             pystray.MenuItem(
                 "Exit",
                 tray_exit,
             ),
         ),
     )
-
 
     # --------------------------------------------------------
     # Start tray icon
@@ -1183,7 +1181,6 @@ def main():
     # --------------------------------------------------------
 
     tray_icon.run_detached()
-
 
     # --------------------------------------------------------
     # Tkinter event loop
@@ -1200,12 +1197,10 @@ def main():
 
         running.clear()
 
-
         # Stop mouse listener
         if listener is not None:
             listener.stop()
             listener.join(timeout=1)
-
 
         # Stop tray icon if it is still active
         if tray_icon is not None:
@@ -1214,17 +1209,14 @@ def main():
             except Exception:
                 pass
 
-
         # Finish logging
         if logging_enabled:
-            logger.info(
-                "SHUTDOWN | complete"
-            )
+            logger.info("SHUTDOWN | complete")
 
             stop_logging()
 
-
         print("Mouse Gravity stopped.")
+
 
 if __name__ == "__main__":
     main()

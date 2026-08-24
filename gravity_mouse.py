@@ -136,6 +136,12 @@ def get_log_directory():
     return log_directory
 
 def start_logging():
+    """
+    Start logging to a file.
+    
+    This function initializes logging by creating a log file with a timestamped name,
+    setting up a file handler, and configuring the logger to write log messages to the file.
+    """
     global logging_enabled
     global log_handler
     global log_path

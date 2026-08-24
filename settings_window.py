@@ -13,28 +13,28 @@ from config import config
 
 SETTINGS_FIELDS = [
     "gravity",
-    "reference_distance",
+    # "reference_distance",
     "gravity_distance_power",
     "min_gravity_distance",
     "max_gravity_acceleration",
-
     "max_speed",
     "drag",
     "stop_radius",
     "fps",
-
-    "normal_input_strength",
-    "toward_input_multiplier",
-    "away_input_multiplier",
-    "lateral_boost_multiplier",
-
-    "click_sequence_timeout",
-
-    "log_telemetry_hz",
+    # "normal_input_strength",
+    # "toward_input_multiplier",
+    # "away_input_multiplier",
+    # "lateral_boost_multiplier",
+    # "click_sequence_timeout",
+    # "log_telemetry_hz",
 ]
 
 
 class SettingsWindow:
+    """
+    A window for configuring the mouse gravity settings.
+    """
+
     def __init__(
         self,
         root,
@@ -49,13 +49,9 @@ class SettingsWindow:
 
         self.window = tk.Toplevel(root)
 
-        self.window.title(
-            "Mouse Gravity Settings"
-        )
+        self.window.title("Mouse Gravity Settings")
 
-        self.window.geometry(
-            "450x600"
-        )
+        self.window.geometry("450x600")
 
         self.window.protocol(
             "WM_DELETE_WINDOW",
@@ -63,7 +59,6 @@ class SettingsWindow:
         )
 
         self._build()
-
 
     # --------------------------------------------------------
     # Build window
@@ -80,7 +75,6 @@ class SettingsWindow:
             expand=True,
         )
 
-
         # ----------------------------------------------------
         # Title
         # ----------------------------------------------------
@@ -96,7 +90,6 @@ class SettingsWindow:
         ).pack(
             pady=(0, 10),
         )
-
 
         # ----------------------------------------------------
         # Scrollable settings area
@@ -119,11 +112,7 @@ class SettingsWindow:
 
         self.settings_frame.bind(
             "<Configure>",
-            lambda event: canvas.configure(
-                scrollregion=canvas.bbox(
-                    "all"
-                )
-            ),
+            lambda event: canvas.configure(scrollregion=canvas.bbox("all")),
         )
 
         canvas_window = canvas.create_window(
@@ -155,19 +144,15 @@ class SettingsWindow:
             fill="y",
         )
 
-
         # ----------------------------------------------------
         # Build configurable fields
         # ----------------------------------------------------
 
-        for row, field_name in enumerate(
-            SETTINGS_FIELDS
-        ):
+        for row, field_name in enumerate(SETTINGS_FIELDS):
             self._create_setting_row(
                 field_name,
                 row,
             )
-
 
         # ----------------------------------------------------
         # Buttons
@@ -191,14 +176,14 @@ class SettingsWindow:
             padx=5,
         )
 
-        ttk.Button(
-            button_frame,
-            text="Reload Current Values",
-            command=self.reload,
-        ).pack(
-            side="left",
-            padx=5,
-        )
+        # ttk.Button(
+        #     button_frame,
+        #     text="Reload Current Values",
+        #     command=self.reload,
+        # ).pack(
+        #     side="left",
+        #     padx=5,
+        # )
 
         ttk.Button(
             button_frame,
@@ -208,7 +193,6 @@ class SettingsWindow:
             side="right",
             padx=5,
         )
-
 
     # --------------------------------------------------------
     # Create one configuration field
@@ -220,10 +204,7 @@ class SettingsWindow:
         row,
     ):
         if not hasattr(config, field_name):
-            raise AttributeError(
-                f"Config has no setting named "
-                f"{field_name!r}"
-            )
+            raise AttributeError(f"Config has no setting named " f"{field_name!r}")
 
         current_value = getattr(
             config,
@@ -236,13 +217,8 @@ class SettingsWindow:
 
         self.variables[field_name] = variable
 
-
         # Human-readable label
-        display_name = (
-            field_name
-            .replace("_", " ")
-            .title()
-        )
+        display_name = field_name.replace("_", " ").title()
 
         ttk.Label(
             self.settings_frame,
@@ -272,7 +248,6 @@ class SettingsWindow:
             weight=1,
         )
 
-
     # --------------------------------------------------------
     # Convert text back to original config type
     # --------------------------------------------------------
@@ -287,15 +262,10 @@ class SettingsWindow:
             field_name,
         )
 
-        expected_type = type(
-            current_value
-        )
-
+        expected_type = type(current_value)
 
         if expected_type is bool:
-            normalized = (
-                text.strip().lower()
-            )
+            normalized = text.strip().lower()
 
             if normalized in {
                 "true",
@@ -313,15 +283,9 @@ class SettingsWindow:
             }:
                 return False
 
-            raise ValueError(
-                "must be true or false"
-            )
+            raise ValueError("must be true or false")
 
-
-        return expected_type(
-            text
-        )
-
+        return expected_type(text)
 
     # --------------------------------------------------------
     # Apply values
@@ -330,17 +294,12 @@ class SettingsWindow:
     def apply(self):
         new_values = {}
 
-
         # Validate everything before changing anything.
         try:
-            for field_name, variable in (
-                self.variables.items()
-            ):
-                new_values[field_name] = (
-                    self._convert_value(
-                        field_name,
-                        variable.get(),
-                    )
+            for field_name, variable in self.variables.items():
+                new_values[field_name] = self._convert_value(
+                    field_name,
+                    variable.get(),
                 )
 
         except ValueError as exc:
@@ -351,7 +310,6 @@ class SettingsWindow:
             )
 
             return
-
 
         # Apply atomically.
         with self.state_lock:
@@ -376,15 +334,11 @@ class SettingsWindow:
                 )
 
                 self.logger.info(
-                    "CONFIG_CHANGE | "
-                    "%s | "
-                    "old=%s | "
-                    "new=%s",
+                    "CONFIG_CHANGE | " "%s | " "old=%s | " "new=%s",
                     field_name,
                     old_value,
                     new_value,
                 )
-
 
     # --------------------------------------------------------
     # Reload values from live configuration
@@ -403,10 +357,7 @@ class SettingsWindow:
                     field_name,
                 )
 
-                variable.set(
-                    str(current_value)
-                )
-
+                variable.set(str(current_value))
 
     # --------------------------------------------------------
     # Show
@@ -418,7 +369,6 @@ class SettingsWindow:
         self.window.deiconify()
         self.window.lift()
         self.window.focus_force()
-
 
     # --------------------------------------------------------
     # Hide

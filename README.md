@@ -26,7 +26,6 @@ Mouse controls are based on click count.
 
 | Input | Action |
 | --- | --- |
-| Single click | Toggle lateral boost on or off |
 | Double click | Assign or replace the gravity target |
 | Triple click | Remove the gravity target and clear velocity |
 | Quadruple click | Exit the program |
@@ -60,8 +59,9 @@ The tray menu provides access to the program even when the settings window has b
 The tray is used to:
 
 - indicate that Mouse Gravity is running
-- expose the current lateral-boost state
+- toggle the current lateral-boost state
 - open or reopen the settings window
+- toggle logging
 - exit the program
 
 Using the tray Exit command shuts down the running components cleanly.
@@ -82,15 +82,15 @@ The settings module also contains the central list or mapping that determines wh
 A current baseline configuration is:
 
 ```python
-GRAVITY = 1200.0
+GRAVITY = 1500.0
 
 REFERENCE_DISTANCE = 300.0
-GRAVITY_DISTANCE_POWER = 1.25
+GRAVITY_DISTANCE_POWER = 1.1
 
 MIN_GRAVITY_DISTANCE = 40.0
-MAX_GRAVITY_ACCELERATION = 5000.0
+MAX_GRAVITY_ACCELERATION = 6000.0
 
-MAX_SPEED = 2000.0
+MAX_SPEED = 2500.0
 DRAG = 0.996
 STOP_RADIUS = 5.0
 FPS = 120
@@ -103,6 +103,8 @@ AWAY_INPUT_MULTIPLIER = 0.35
 LATERAL_BOOST_MULTIPLIER = 2.0
 
 CLICK_SEQUENCE_TIMEOUT = 0.35
+```
+
 ```
 
 See `mouse_gravity_constants.md` for the purpose, type, useful range, limits, and interactions of each setting.
@@ -276,7 +278,7 @@ Typical use:
 2. Use the settings window to review or adjust the exposed values.
 3. Double-click to create a gravity target.
 4. Move the mouse and observe the target pulling the cursor.
-5. Single-click to toggle lateral boost when additional orbital input is wanted.
+5. Use the tray menu to toggle lateral boost if desired.
 6. Triple-click to clear the target and velocity.
 7. Close the settings window if it is not needed.
 8. Reopen the settings window from the tray icon when required.
@@ -286,11 +288,10 @@ Typical use:
 
 1. Double-click near the desired center of motion.
 2. Allow gravity to begin pulling inward.
-3. Single-click to enable lateral boost.
-4. Physically move sideways relative to the target.
-5. Stop moving the mouse and allow the stored velocity to continue.
-6. Add more tangential input if the orbit begins collapsing.
-7. Disable lateral boost when normal input sensitivity is preferred.
+3. Physically move sideways relative to the target.
+4. Stop moving the mouse and allow the stored velocity to continue.
+5. Add more tangential input if the orbit begins collapsing.
+6. Disable lateral boost when normal input sensitivity is preferred.
 
 ## Click Recognition
 
@@ -312,7 +313,7 @@ Increase gravity, input strength, speed limits, and momentum retention gradually
 
 ## Project Structure
 
-The project is now separated by responsibility rather than keeping all behavior and tuning values in one file.
+The project is separated by responsibility
 
 A representative layout is:
 

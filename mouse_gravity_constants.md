@@ -20,21 +20,21 @@ Windows API metric identifiers and derived screen bounds are implementation cons
 The current baseline values used throughout this document are:
 
 ```python
-GRAVITY = 1200.0
+GRAVITY = 2000.0
 
 REFERENCE_DISTANCE = 300.0
-GRAVITY_DISTANCE_POWER = 1.25
+GRAVITY_DISTANCE_POWER = 1.5
 MIN_GRAVITY_DISTANCE = 40.0
-MAX_GRAVITY_ACCELERATION = 5000.0
+MAX_GRAVITY_ACCELERATION = 6000.0
 
-MAX_SPEED = 2000.0
-DRAG = 0.996
+MAX_SPEED = 2500.0
+DRAG = 0.9999
 STOP_RADIUS = 5.0
 FPS = 120
 
 NORMAL_INPUT_STRENGTH = 10.0
 TOWARD_INPUT_MULTIPLIER = 1.0
-AWAY_INPUT_MULTIPLIER = 0.355
+AWAY_INPUT_MULTIPLIER = 0.35
 LATERAL_BOOST_MULTIPLIER = 2.0
 
 CLICK_SEQUENCE_TIMEOUT = 0.35
@@ -47,7 +47,7 @@ CLICK_SEQUENCE_TIMEOUT = 0.35
 ### `GRAVITY`
 
 ```python
-GRAVITY = 1200.0
+GRAVITY = 2000.0
 ```
 
 **Type:** `float`
@@ -85,7 +85,7 @@ At `0.0`, there is no gravitational pull.
 ### `GRAVITY_DISTANCE_POWER`
 
 ```python
-GRAVITY_DISTANCE_POWER = 1.25
+GRAVITY_DISTANCE_POWER = 1.5
 ```
 
 **Type:** `float`
@@ -149,7 +149,7 @@ GRAVITY_DISTANCE_POWER    Gravity multiplier
 A good starting value is:
 
 ```python
-GRAVITY_DISTANCE_POWER = 1.25
+GRAVITY_DISTANCE_POWER = 1.5
 ```
 
 This preserves the effect of stronger gravity near the target without producing the very aggressive close-range pull of inverse-square gravity.
@@ -276,7 +276,7 @@ This prevents gravity from approaching extreme values near the target.
 ### `MAX_GRAVITY_ACCELERATION`
 
 ```python
-MAX_GRAVITY_ACCELERATION = 5000.0
+MAX_GRAVITY_ACCELERATION = 6000.0
 ```
 
 **Type:** `float`
@@ -320,7 +320,7 @@ This prevents very close approaches from generating excessive acceleration.
 ### `MAX_SPEED`
 
 ```python
-MAX_SPEED = 2000.0
+MAX_SPEED = 2500.0
 ```
 
 **Type:** `float`
@@ -355,7 +355,7 @@ After gravity and user input modify velocity, the total speed is clamped to this
 ### `DRAG`
 
 ```python
-DRAG = 0.996
+DRAG = 0.9999
 ```
 
 **Type:** `float`
@@ -820,15 +820,15 @@ Note that the virtual desktop is a bounding rectangle. If the physical monitors 
 The current balanced baseline is:
 
 ```python
-GRAVITY = 1200.0
+GRAVITY = 2000.0
 
 REFERENCE_DISTANCE = 300.0
-GRAVITY_DISTANCE_POWER = 1.25
+GRAVITY_DISTANCE_POWER = 1.5
 MIN_GRAVITY_DISTANCE = 40.0
-MAX_GRAVITY_ACCELERATION = 5000.0
+MAX_GRAVITY_ACCELERATION = 6000.0
 
 MAX_SPEED = 2000.0
-DRAG = 0.996
+DRAG = 0.9999
 STOP_RADIUS = 5.0
 FPS = 120
 
@@ -937,5 +937,3 @@ For example, the same `DRAG` value at `120 FPS` does not produce exactly the sam
 because drag is applied half as many times per second at 60 FPS.
 
 If `FPS` will remain fixed, this is usually not a problem.
-
-If you want to experiment heavily with different frame rates, the drag calculation should eventually be converted to a time-based formula so that damping remains consistent regardless of FPS.

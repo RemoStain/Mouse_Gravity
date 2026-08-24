@@ -82,16 +82,16 @@ The settings module also contains the central list or mapping that determines wh
 A current baseline configuration is:
 
 ```python
-GRAVITY = 1500.0
+GRAVITY = 2000.0
 
 REFERENCE_DISTANCE = 300.0
-GRAVITY_DISTANCE_POWER = 1.1
+GRAVITY_DISTANCE_POWER = 1.5
 
 MIN_GRAVITY_DISTANCE = 40.0
 MAX_GRAVITY_ACCELERATION = 6000.0
 
 MAX_SPEED = 2500.0
-DRAG = 0.996
+DRAG = 0.9999
 STOP_RADIUS = 5.0
 FPS = 120
 

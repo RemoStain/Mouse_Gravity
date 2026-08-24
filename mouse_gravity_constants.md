@@ -1,13 +1,53 @@
 # Mouse Gravity Constants Reference
 
-This file describes the constants used by the mouse-gravity script, including their purpose, expected data type, reasonable values, practical limits, and interactions with other settings.
+This file describes the configurable values used by Mouse Gravity, including their purpose, expected data type, reasonable values, practical limits, and interactions with other settings.
+
+The values are kept in the separate settings/configuration module rather than being owned by the main physics script. The settings window reads the centrally defined list of exposed variables and can update those values while Mouse Gravity is running.
+
+Changing a value in the settings window changes the value used by the running program; closing the window does not stop the physics loop. The window can be reopened from the system tray.
+
+
+## Runtime Settings
+
+The settings module is the single source of truth for user-adjustable physics and input values.
+
+The settings UI should be generated from the central exposed-settings definition near the top of that module. This avoids maintaining a second hard-coded list inside the UI.
+
+A setting should only be exposed when changing it at runtime is supported by the program.
+
+Windows API metric identifiers and derived screen bounds are implementation constants, not user-tuning values, and should not be included in the editable settings list.
+
+The current baseline values used throughout this document are:
+
+```python
+GRAVITY = 1200.0
+
+REFERENCE_DISTANCE = 300.0
+GRAVITY_DISTANCE_POWER = 1.25
+MIN_GRAVITY_DISTANCE = 40.0
+MAX_GRAVITY_ACCELERATION = 5000.0
+
+MAX_SPEED = 2000.0
+DRAG = 0.996
+STOP_RADIUS = 5.0
+FPS = 120
+
+NORMAL_INPUT_STRENGTH = 10.0
+TOWARD_INPUT_MULTIPLIER = 1.0
+AWAY_INPUT_MULTIPLIER = 0.355
+LATERAL_BOOST_MULTIPLIER = 2.0
+
+CLICK_SEQUENCE_TIMEOUT = 0.35
+```
+
+---
 
 ## Physics Constants
 
 ### `GRAVITY`
 
 ```python
-GRAVITY = 1800.0
+GRAVITY = 1200.0
 ```
 
 **Type:** `float`
@@ -45,7 +85,7 @@ At `0.0`, there is no gravitational pull.
 ### `GRAVITY_DISTANCE_POWER`
 
 ```python
-GRAVITY_DISTANCE_POWER = 1.0
+GRAVITY_DISTANCE_POWER = 1.25
 ```
 
 **Type:** `float`
@@ -109,7 +149,7 @@ GRAVITY_DISTANCE_POWER    Gravity multiplier
 A good starting value is:
 
 ```python
-GRAVITY_DISTANCE_POWER = 1.0
+GRAVITY_DISTANCE_POWER = 1.25
 ```
 
 This preserves the effect of stronger gravity near the target without producing the very aggressive close-range pull of inverse-square gravity.
@@ -280,7 +320,7 @@ This prevents very close approaches from generating excessive acceleration.
 ### `MAX_SPEED`
 
 ```python
-MAX_SPEED = 1800.0
+MAX_SPEED = 2000.0
 ```
 
 **Type:** `float`
@@ -315,7 +355,7 @@ After gravity and user input modify velocity, the total speed is clamped to this
 ### `DRAG`
 
 ```python
-DRAG = 0.992
+DRAG = 0.996
 ```
 
 **Type:** `float`
@@ -362,7 +402,7 @@ Because drag is applied once per frame, its effective strength depends on `FPS`.
 ### `STOP_RADIUS`
 
 ```python
-STOP_RADIUS = 3.0
+STOP_RADIUS = 5.0
 ```
 
 **Type:** `float`
@@ -440,7 +480,7 @@ between updates.
 ### `NORMAL_INPUT_STRENGTH`
 
 ```python
-NORMAL_INPUT_STRENGTH = 25.0
+NORMAL_INPUT_STRENGTH = 10.0
 ```
 
 **Type:** `float`
@@ -477,7 +517,7 @@ This affects both radial and tangential user input before their individual multi
 ### `LATERAL_BOOST_MULTIPLIER`
 
 ```python
-LATERAL_BOOST_MULTIPLIER = 4.0
+LATERAL_BOOST_MULTIPLIER = 2.0
 ```
 
 **Type:** `float`
@@ -490,14 +530,14 @@ It does **not** continuously add energy by itself. If the user does not physical
 For example:
 
 ```python
-NORMAL_INPUT_STRENGTH = 25.0
-LATERAL_BOOST_MULTIPLIER = 4.0
+NORMAL_INPUT_STRENGTH = 10.0
+LATERAL_BOOST_MULTIPLIER = 2.0
 ```
 
 produces an effective boosted tangential input strength of:
 
 ```text
-25 × 4 = 100
+10 × 2 = 20
 ```
 
 **Reasonable values:**
@@ -559,7 +599,7 @@ NORMAL_INPUT_STRENGTH × TOWARD_INPUT_MULTIPLIER
 For the defaults:
 
 ```text
-25 × 1.0 = 25
+10 × 1.0 = 10
 ```
 
 - Raising this makes moving with gravity easier.
@@ -571,7 +611,7 @@ For the defaults:
 ### `AWAY_INPUT_MULTIPLIER`
 
 ```python
-AWAY_INPUT_MULTIPLIER = 0.3
+AWAY_INPUT_MULTIPLIER = 0.35
 ```
 
 **Type:** `float`
@@ -606,20 +646,20 @@ NORMAL_INPUT_STRENGTH × AWAY_INPUT_MULTIPLIER
 With:
 
 ```python
-NORMAL_INPUT_STRENGTH = 25.0
-AWAY_INPUT_MULTIPLIER = 0.3
+NORMAL_INPUT_STRENGTH = 10.0
+AWAY_INPUT_MULTIPLIER = 0.35
 ```
 
 the effective outward strength is:
 
 ```text
-7.5
+3.5
 ```
 
 compared with inward strength:
 
 ```text
-25.0
+10.0
 ```
 
 assuming:
@@ -642,6 +682,9 @@ If the design requirement is that moving away should always be harder than movin
 
 ## Click Recognition
 
+Click recognition is independent of the settings-window lifecycle. Closing the settings window does not disable click handling, gravity, or the tray icon.
+
+
 ### `CLICK_SEQUENCE_TIMEOUT`
 
 ```python
@@ -658,7 +701,7 @@ The current controls are:
 ```text
 1 click   = toggle lateral boost
 2 clicks  = assign new gravity target
-3 clicks  = ignored
+3 clicks  = remove the active gravity target and clear velocity
 4 clicks  = exit
 ```
 
@@ -774,61 +817,32 @@ Note that the virtual desktop is a bounding rectangle. If the physical monitors 
 
 # Recommended Starting Configuration
 
-A balanced setup:
+The current balanced baseline is:
 
 ```python
-GRAVITY = 1800.0
+GRAVITY = 1200.0
 
-MAX_SPEED = 1800.0
-DRAG = 0.992
-STOP_RADIUS = 3.0
+REFERENCE_DISTANCE = 300.0
+GRAVITY_DISTANCE_POWER = 1.25
+MIN_GRAVITY_DISTANCE = 40.0
+MAX_GRAVITY_ACCELERATION = 5000.0
+
+MAX_SPEED = 2000.0
+DRAG = 0.996
+STOP_RADIUS = 5.0
 FPS = 120
 
-NORMAL_INPUT_STRENGTH = 25.0
-
-TOWARD_INPUT_MULTIPLIER = 1.0
-AWAY_INPUT_MULTIPLIER = 0.3
-
-LATERAL_BOOST_MULTIPLIER = 4.0
-
-CLICK_SEQUENCE_TIMEOUT = 0.35
-```
-
-## More Stable / Easier to Control
-
-```python
-GRAVITY = 1400.0
-
-MAX_SPEED = 1400.0
-DRAG = 0.985
-STOP_RADIUS = 4.0
-FPS = 120
-
-NORMAL_INPUT_STRENGTH = 20.0
+NORMAL_INPUT_STRENGTH = 10.0
 
 TOWARD_INPUT_MULTIPLIER = 1.0
 AWAY_INPUT_MULTIPLIER = 0.35
 
-LATERAL_BOOST_MULTIPLIER = 3.0
+LATERAL_BOOST_MULTIPLIER = 2.0
+
+CLICK_SEQUENCE_TIMEOUT = 0.35
 ```
 
-## Strong Orbital Behavior
-
-```python
-GRAVITY = 1800.0
-
-MAX_SPEED = 2500.0
-DRAG = 0.996
-STOP_RADIUS = 3.0
-FPS = 120
-
-NORMAL_INPUT_STRENGTH = 30.0
-
-TOWARD_INPUT_MULTIPLIER = 1.0
-AWAY_INPUT_MULTIPLIER = 0.25
-
-LATERAL_BOOST_MULTIPLIER = 5.0
-```
+These are starting values rather than required values. The settings window is intended to make experimentation possible without editing the physics source.
 
 # Important Relationships
 
@@ -907,7 +921,7 @@ For example:
 
 ```python
 TOWARD_INPUT_MULTIPLIER = 1.0
-AWAY_INPUT_MULTIPLIER = 0.3
+AWAY_INPUT_MULTIPLIER = 0.35
 ```
 
 means outward physical input has only 30% of the radial effect of inward physical input, before accounting for gravity itself.
@@ -918,19 +932,7 @@ means outward physical input has only 30% of the radial effect of inward physica
 
 `DRAG` is currently frame-dependent.
 
-For example:
-
-```python
-DRAG = 0.992
-FPS = 120
-```
-
-does not produce exactly the same damping behavior as:
-
-```python
-DRAG = 0.992
-FPS = 60
-```
+For example, the same `DRAG` value at `120 FPS` does not produce exactly the same damping behavior at `60 FPS` because drag is applied a different number of times per second.
 
 because drag is applied half as many times per second at 60 FPS.
 

@@ -120,18 +120,22 @@ print(
 def get_log_directory():
     """
     Return the directory where Mouse Gravity logs are stored.
-    """
-    return Path(__file__).resolve().parent
 
+    Creates the directory automatically if it does not exist.
+    """
+    log_directory = (
+        Path(__file__).resolve().parent
+        / "logs"
+    )
+
+    log_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    return log_directory
 
 def start_logging():
-    """
-    Start logging to a file.
-
-    This function initializes logging by creating a log file with a timestamped name,
-    setting up a file handler, and configuring the logger to write debug-level messages
-    to the log file. It also logs the current configuration settings.
-    """
     global logging_enabled
     global log_handler
     global log_path
@@ -140,9 +144,14 @@ def start_logging():
         if log_handler is not None:
             return
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        timestamp = datetime.now().strftime(
+            "%Y-%m-%d_%H-%M-%S"
+        )
 
-        log_path = get_log_directory() / f"logs/mouse_gravity_{timestamp}.log"
+        log_path = (
+            get_log_directory()
+            / f"mouse_gravity_{timestamp}.log"
+        )
 
         log_handler = logging.FileHandler(
             log_path,
@@ -152,7 +161,9 @@ def start_logging():
         log_handler.setLevel(logging.DEBUG)
 
         formatter = logging.Formatter(
-            "%(asctime)s.%(msecs)03d | " "%(levelname)-8s | " "%(message)s",
+            "%(asctime)s.%(msecs)03d | "
+            "%(levelname)-8s | "
+            "%(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
@@ -163,11 +174,9 @@ def start_logging():
         logging_enabled = True
 
     logger.info("LOGGING | enabled")
-
     log_configuration()
 
     print(f"Logging enabled: {log_path}")
-
 
 def stop_logging():
     """

@@ -13,46 +13,10 @@ from pynput import mouse
 import pystray
 
 import ctypes
+import tkinter as tk
 
-# ------------------------------------------------------------
-# Physics settings
-# ------------------------------------------------------------
-
-GRAVITY = 1500.0
-
-GRAVITY_DISTANCE_POWER = 1.1
-REFERENCE_DISTANCE = 300.0
-
-MIN_GRAVITY_DISTANCE = 40.0
-MAX_GRAVITY_ACCELERATION = 6000.0
-
-MAX_SPEED = 3000.0
-DRAG = 0.996
-STOP_RADIUS = 5.0
-FPS = 120
-
-# How strongly actual mouse movement affects orbital momentum
-TOWARD_INPUT_MULTIPLIER = (
-    1.0  # pixels per second per pixel of user input toward the target
-)
-AWAY_INPUT_MULTIPLIER = (
-    0.35  # pixels per second per pixel of user input away from the target
-)
-
-LATERAL_BOOST_MULTIPLIER = (
-    2.0  # pixels per second per pixel of user input perpendicular to the target
-)
-NORMAL_INPUT_STRENGTH = (
-    10.0  # pixels per second per pixel of user input in any direction
-)
-
-
-# ------------------------------------------------------------
-# Click settings
-# ------------------------------------------------------------
-
-CLICK_SEQUENCE_TIMEOUT = 0.35  # seconds
-
+from config import config
+from settings_window import SettingsWindow
 
 # ------------------------------------------------------------
 # Shared state
@@ -93,14 +57,8 @@ tray_icon = (
 )
 listener = None  # Mouse listener object for detecting mouse clicks, or None if no listener is created
 
-# ------------------------------------------------------------
-# Logging settings
-# ------------------------------------------------------------
-
-LOGGING_ENABLED_BY_DEFAULT = True
-
-# Number of physics snapshots written per second.
-LOG_TELEMETRY_HZ = 10
+tk_root = None  # Tkinter root window for the settings UI, or None if no root window is created
+settings_ui = None  # SettingsWindow object for the settings UI, or None if no settings UI is created
 
 
 # ------------------------------------------------------------
@@ -158,6 +116,13 @@ def get_log_directory():
 
 
 def start_logging():
+    """
+    Start logging to a file.
+
+    This function initializes logging by creating a log file with a timestamped name,
+    setting up a file handler, and configuring the logger to write debug-level messages
+    to the log file. It also logs the current configuration settings.
+    """
     global logging_enabled
     global log_handler
     global log_path
@@ -196,6 +161,12 @@ def start_logging():
 
 
 def stop_logging():
+    """
+    Stop logging and close the log file.
+
+    This function disables logging, removes the log handler from the logger,
+    flushes and closes the log handler, and prints a message indicating that logging has been disabled.
+    """
     global logging_enabled
     global log_handler
 
@@ -221,66 +192,50 @@ def stop_logging():
 
 def log_configuration():
     """
-    Record all important tuning constants at startup.
+    Log the current configuration settings for Mouse Gravity.
+
+    This function logs the values of various configuration parameters
+    related to gravity, momentum, physical mouse input, and click recognition.
     """
     logger.info("Mouse Gravity started")
 
     logger.info(
-        "CONFIG  | "
-        "GRAVITY=%s | "
-        "REFERENCE_DISTANCE=%s | "
-        "GRAVITY_DISTANCE_POWER=%s | "
-        "MIN_GRAVITY_DISTANCE=%s | "
-        "MAX_GRAVITY_ACCELERATION=%s",
-        GRAVITY,
-        REFERENCE_DISTANCE,
-        GRAVITY_DISTANCE_POWER,
-        MIN_GRAVITY_DISTANCE,
-        MAX_GRAVITY_ACCELERATION,
-    )
-
-    logger.info(
-        "CONFIG | " "MAX_SPEED=%s | " "DRAG=%s | " "STOP_RADIUS=%s | " "FPS=%s",
-        MAX_SPEED,
-        DRAG,
-        STOP_RADIUS,
-        FPS,
+        "CONFIG | "
+        "gravity=%s | "
+        "reference_distance=%s | "
+        "gravity_distance_power=%s | "
+        "min_gravity_distance=%s | "
+        "max_gravity_acceleration=%s",
+        config.gravity,
+        config.reference_distance,
+        config.gravity_distance_power,
+        config.min_gravity_distance,
+        config.max_gravity_acceleration,
     )
 
     logger.info(
         "CONFIG | "
-        "NORMAL_INPUT_STRENGTH=%s | "
-        "TOWARD_INPUT_MULTIPLIER=%s | "
-        "AWAY_INPUT_MULTIPLIER=%s | "
-        "LATERAL_BOOST_MULTIPLIER=%s",
-        NORMAL_INPUT_STRENGTH,
-        TOWARD_INPUT_MULTIPLIER,
-        AWAY_INPUT_MULTIPLIER,
-        LATERAL_BOOST_MULTIPLIER,
+        "max_speed=%s | "
+        "drag=%s | "
+        "stop_radius=%s | "
+        "fps=%s",
+        config.max_speed,
+        config.drag,
+        config.stop_radius,
+        config.fps,
     )
 
     logger.info(
-        "CONFIG | " "CLICK_SEQUENCE_TIMEOUT=%s | " "LOG_TELEMETRY_HZ=%s",
-        CLICK_SEQUENCE_TIMEOUT,
-        LOG_TELEMETRY_HZ,
+        "CONFIG | "
+        "normal_input_strength=%s | "
+        "toward_input_multiplier=%s | "
+        "away_input_multiplier=%s | "
+        "lateral_boost_multiplier=%s",
+        config.normal_input_strength,
+        config.toward_input_multiplier,
+        config.away_input_multiplier,
+        config.lateral_boost_multiplier,
     )
-
-    logger.info(
-        "DESKTOP | "
-        "left=%s | "
-        "top=%s | "
-        "right=%s | "
-        "bottom=%s | "
-        "width=%s | "
-        "height=%s",
-        SCREEN_LEFT,
-        SCREEN_TOP,
-        SCREEN_RIGHT,
-        SCREEN_BOTTOM,
-        SCREEN_WIDTH,
-        SCREEN_HEIGHT,
-    )
-
 
 # ------------------------------------------------------------
 # Tray icon
@@ -468,7 +423,18 @@ def create_vortex_icon(size=64, boost_active=False):
     return image
 
 
+
 def toggle_logging(icon, item):
+    """
+    Toggle logging on or off from the tray menu.
+
+    pystray callbacks may occur outside tkinter's thread,
+    so the logging operation is scheduled through root.after().
+    
+    Args:
+        icon (pystray.Icon): The tray icon instance.
+        item (pystray.MenuItem): The menu item that triggered the toggle action.
+    """
     if logging_enabled:
         stop_logging()
     else:
@@ -504,39 +470,85 @@ def update_tray_status():
     tray_icon.icon = create_vortex_icon(boost_active=boost_active)
 
 
+def show_settings_window(icon=None, item=None):
+    """
+    Show the settings window from the tray menu.
+
+    pystray callbacks may occur outside tkinter's thread,
+    so the GUI operation is scheduled through root.after().
+    """
+    if tk_root is None or settings_ui is None:
+        return
+
+    tk_root.after(
+        0,
+        settings_ui.show,
+    )
+
 # ------------------------------------------------------------
 # Shutdown
 # ------------------------------------------------------------
 
 
 def shutdown():
+    """
+    Shutdown Mouse Gravity gracefully.
+
+    This function stops the physics loop, cancels any pending click recognition,
+    stops the tray icon, and ends the tkinter mainloop.
+    """
     global click_timer
 
     if not running.is_set():
         return
 
     if logging_enabled:
-        logger.info("SHUTDOWN | beginning shutdown")
+        logger.info(
+            "SHUTDOWN | beginning shutdown"
+        )
 
     running.clear()
 
+
+    # Cancel pending click recognition
     with click_lock:
         if click_timer is not None:
             click_timer.cancel()
             click_timer = None
 
+
+    # Stop tray icon
     if tray_icon is not None:
         tray_icon.stop()
 
 
+    # End tkinter mainloop
+    if tk_root is not None:
+        try:
+            tk_root.after(
+                0,
+                tk_root.destroy,
+            )
+        except tk.TclError:
+            pass
+
+
 def tray_exit(icon, item):
     """
-    Callback function for the "Exit" menu item in the tray icon's context menu.
+    Exit Mouse Gravity from the tray menu.
+
+    pystray callbacks may occur outside tkinter's thread,
+    so the shutdown operation is scheduled through root.after().
+
     Args:
-        icon (pystray.Icon): The tray icon object.
-        item (pystray.MenuItem): The menu item that was clicked.
+        icon (pystray.Icon): The tray icon instance.
+        item (pystray.MenuItem): The menu item that triggered the exit action.
     """
-    logger.info("EXIT | tray menu")
+    if logging_enabled:
+        logger.info(
+            "EXIT | tray menu"
+        )
+
     shutdown()
 
 
@@ -671,7 +683,7 @@ def on_click(x, y, button, pressed):
 
     with click_lock:
 
-        if now - last_click_time > CLICK_SEQUENCE_TIMEOUT:
+        if now - last_click_time > config.click_sequence_timeout:
             click_count = 0
 
         click_count += 1
@@ -688,7 +700,7 @@ def on_click(x, y, button, pressed):
 
         else:
             click_timer = threading.Timer(
-                CLICK_SEQUENCE_TIMEOUT,
+                config.click_sequence_timeout,
                 process_click_sequence,
                 args=(x, y),
             )
@@ -715,6 +727,7 @@ def on_click(x, y, button, pressed):
 def gravity_loop():
     """
     Main loop for simulating mouse gravity physics.
+
     This function runs in a separate thread and continuously updates the mouse cursor's position
     based on the current target, user input, and physics parameters.
     """
@@ -726,14 +739,16 @@ def gravity_loop():
     expected_x, expected_y = controller.position
 
     telemetry_interval = (
-        1.0 / LOG_TELEMETRY_HZ
-        if LOG_TELEMETRY_HZ > 0
+        1.0 / config.log_telemetry_hz
+        if config.log_telemetry_hz > 0
         else None
     )
 
     last_telemetry_time = time.perf_counter()
 
-
+    # --------------------------------------------------------
+    # Main loop
+    # --------------------------------------------------------
     while running.is_set():
 
         current_time = time.perf_counter()
@@ -751,21 +766,28 @@ def gravity_loop():
         # Detect physical mouse input
         # ----------------------------------------------------
 
+        # Get the actual mouse position from the system.
         actual_x, actual_y = controller.position
 
+        # Calculate the difference between the actual mouse position and the expected position.
         user_dx = actual_x - expected_x
         user_dy = actual_y - expected_y
 
+        # ----------------------------------------------------
+        # Gravity and physics
+        # ----------------------------------------------------
         if current_target is not None:
 
+            # Get the target coordinates from the current target.
             target_x, target_y = current_target
 
+            # Calculate the difference between the target position and the actual mouse position.
             dx = target_x - actual_x
             dy = target_y - actual_y
 
             distance = math.hypot(dx, dy)
 
-            if distance > STOP_RADIUS:
+            if distance > config.stop_radius:
 
                 radial_x = dx / distance
                 radial_y = dy / distance
@@ -777,24 +799,29 @@ def gravity_loop():
                 # closer to the target.
                 # ------------------------------------------------
 
+                # Clamp the distance to a minimum value to avoid excessive gravity at very close distances.
                 gravity_distance = max(
                     distance,
-                    MIN_GRAVITY_DISTANCE,
+                    config.min_gravity_distance,
                 )
 
+                # Calculate the gravity strength based on the distance to the target.
                 gravity_strength = (
-                    GRAVITY
-                    * (REFERENCE_DISTANCE / gravity_distance) ** GRAVITY_DISTANCE_POWER
+                    config.gravity
+                    * (config.reference_distance / gravity_distance) ** config.gravity_distance_power
                 )
 
+                # Clamp the gravity strength to a maximum value to prevent excessive acceleration.
                 gravity_strength = min(
                     gravity_strength,
-                    MAX_GRAVITY_ACCELERATION,
+                    config.max_gravity_acceleration,
                 )
 
+                # Set the acceleration components based on the radial direction and gravity strength.
                 acceleration_x = radial_x * gravity_strength
                 acceleration_y = radial_y * gravity_strength
 
+                # Velocity update based on acceleration and time step.
                 velocity_x += acceleration_x * dt
                 velocity_y += acceleration_y * dt
 
@@ -831,10 +858,10 @@ def gravity_loop():
                 # ------------------------------------------------
 
                 if radial_input >= 0:
-                    radial_strength = NORMAL_INPUT_STRENGTH * TOWARD_INPUT_MULTIPLIER
+                    radial_strength = config.normal_input_strength * config.toward_input_multiplier
 
                 else:
-                    radial_strength = NORMAL_INPUT_STRENGTH * AWAY_INPUT_MULTIPLIER
+                    radial_strength = config.normal_input_strength * config.away_input_multiplier
 
                 velocity_x += radial_x * radial_input * radial_strength
 
@@ -847,10 +874,10 @@ def gravity_loop():
                 # mouse movement.
                 # ------------------------------------------------
 
-                tangential_strength = NORMAL_INPUT_STRENGTH
+                tangential_strength = config.normal_input_strength
 
                 if boost_active:
-                    tangential_strength *= LATERAL_BOOST_MULTIPLIER
+                    tangential_strength *= config.lateral_boost_multiplier
 
                 velocity_x += tangent_x * tangential_input * tangential_strength
 
@@ -860,8 +887,8 @@ def gravity_loop():
                 # Drag
                 # ------------------------------------------------
 
-                velocity_x *= DRAG
-                velocity_y *= DRAG
+                velocity_x *= config.drag
+                velocity_y *= config.drag
 
                 # ------------------------------------------------
                 # Maximum speed
@@ -872,9 +899,9 @@ def gravity_loop():
                     velocity_y,
                 )
 
-                if speed > MAX_SPEED:
+                if speed > config.max_speed:
 
-                    scale = MAX_SPEED / speed
+                    scale = config.max_speed / speed
 
                     velocity_x *= scale
                     velocity_y *= scale
@@ -883,6 +910,7 @@ def gravity_loop():
                 # Proposed movement
                 # ------------------------------------------------
 
+                # Calculate the new position of the cursor based on the current velocity and time step.
                 new_x = actual_x + velocity_x * dt
 
                 new_y = actual_y + velocity_y * dt
@@ -904,7 +932,7 @@ def gravity_loop():
                     )
 
                     logger.debug(
-                        "PHYSICS | "
+                        "physics | "
                         "cursor=(%.1f, %.1f) | "
                         "target=(%.1f, %.1f) | "
                         "distance=%.2f | "
@@ -998,7 +1026,7 @@ def gravity_loop():
         else:
             expected_x, expected_y = controller.position
 
-        time.sleep(1 / FPS)
+        time.sleep(1 / config.fps)
 
 
 # ------------------------------------------------------------
@@ -1008,51 +1036,138 @@ def gravity_loop():
 
 def main():
     """
-    Main function to start the Mouse Gravity program.
-    This function initializes the mouse listener, starts the gravity loop in a separate thread,
-    and creates the system tray icon.
+    Start Mouse Gravity.
+
+    Initializes:
+    - Optional startup logging
+    - Mouse listener
+    - Physics thread
+    - Tkinter settings window
+    - System tray icon
+    - Tkinter main event loop
     """
     global tray_icon
     global listener
+    global tk_root
+    global settings_ui
 
-    if LOGGING_ENABLED_BY_DEFAULT:
+    # --------------------------------------------------------
+    # Logging
+    # --------------------------------------------------------
+
+    if config.logging_enabled_by_default:
         start_logging()
 
-    print(
-        "Mouse Gravity started. \nSingle click to toggle lateral boost \nDouble click to set a target \nTriple click to remove target \nQuadruple click to exit."
+
+    # --------------------------------------------------------
+    # Mouse listener
+    # --------------------------------------------------------
+
+    listener = mouse.Listener(
+        on_click=on_click,
     )
-    listener = mouse.Listener(on_click=on_click)
 
     listener.start()
+
+
+    # --------------------------------------------------------
+    # Physics thread
+    # --------------------------------------------------------
 
     physics_thread = threading.Thread(
         target=gravity_loop,
         daemon=True,
+        name="MouseGravityPhysics",
     )
 
     physics_thread.start()
 
+
+    # --------------------------------------------------------
+    # Tkinter root
+    # --------------------------------------------------------
+
+    tk_root = tk.Tk()
+
+    # The root itself is never shown.
+    # The actual settings interface is a Toplevel window
+    # managed by SettingsWindow.
+    tk_root.withdraw()
+
+
+    # --------------------------------------------------------
+    # Settings window
+    # --------------------------------------------------------
+
+    settings_ui = SettingsWindow(
+        root=tk_root,
+        state_lock=state_lock,
+        logger=logger,
+    )
+
+
+    # --------------------------------------------------------
+    # Tray icon
+    # --------------------------------------------------------
+
     tray_icon = pystray.Icon(
         "mouse_gravity",
-        create_vortex_icon(boost_active=False),
+
+        create_vortex_icon(
+            boost_active=False,
+        ),
+
         "Mouse Gravity: ACTIVE | Boost: OFF",
+
         menu=pystray.Menu(
+
+            # ------------------------------------------------
+            # Status
+            # ------------------------------------------------
+
             pystray.MenuItem(
                 "Mouse Gravity: ACTIVE",
-                lambda: None,
+                lambda icon, item: None,
                 enabled=False,
             ),
+
             pystray.Menu.SEPARATOR,
+
+
+            # ------------------------------------------------
+            # Settings
+            # ------------------------------------------------
+
+            pystray.MenuItem(
+                "Open Settings",
+                show_settings_window,
+            ),
+
+            pystray.Menu.SEPARATOR,
+
+
+            # ------------------------------------------------
+            # Logging
+            # ------------------------------------------------
+
             pystray.MenuItem(
                 "Enable Logging",
                 toggle_logging,
                 checked=lambda item: logging_enabled,
             ),
+
             pystray.MenuItem(
                 "Open Log Folder",
                 open_log_folder,
             ),
+
             pystray.Menu.SEPARATOR,
+
+
+            # ------------------------------------------------
+            # Exit
+            # ------------------------------------------------
+
             pystray.MenuItem(
                 "Exit",
                 tray_exit,
@@ -1060,22 +1175,56 @@ def main():
         ),
     )
 
+
+    # --------------------------------------------------------
+    # Start tray icon
+    #
+    # run_detached() allows tkinter to own the main thread.
+    # --------------------------------------------------------
+
+    tray_icon.run_detached()
+
+
+    # --------------------------------------------------------
+    # Tkinter event loop
+    # --------------------------------------------------------
+
     try:
-        tray_icon.run()
+        tk_root.mainloop()
 
     finally:
+
+        # ----------------------------------------------------
+        # Final cleanup
+        # ----------------------------------------------------
+
         running.clear()
 
+
+        # Stop mouse listener
         if listener is not None:
             listener.stop()
             listener.join(timeout=1)
 
+
+        # Stop tray icon if it is still active
+        if tray_icon is not None:
+            try:
+                tray_icon.stop()
+            except Exception:
+                pass
+
+
+        # Finish logging
         if logging_enabled:
-            logger.info("SHUTDOWN | complete")
+            logger.info(
+                "SHUTDOWN | complete"
+            )
+
             stop_logging()
 
-        print("Mouse Gravity stopped.")
 
+        print("Mouse Gravity stopped.")
 
 if __name__ == "__main__":
     main()

@@ -1,29 +1,15 @@
 from dataclasses import dataclass
 
 
+# Hard safety/performance limit for multi-point mode.
+# With five points there are at most 10 point-to-point pairs.
+MAX_GRAVITY_POINTS = 5
+
+
 @dataclass
 class MouseGravityConfig:
     """
     Configuration for the mouse gravity simulation.
-
-    Attributes:
-        gravity (float): The gravitational force applied to the mouse cursor.
-        reference_distance (float): The reference distance for gravity calculations.
-        gravity_distance_power (float): The power to which the distance is raised for gravity calculations.
-        min_gravity_distance (float): The minimum distance at which gravity is applied.
-        max_gravity_acceleration (float): The maximum acceleration due to gravity.
-        max_speed (float): The maximum speed of the mouse cursor.
-        drag (float): The drag factor applied to the mouse cursor's movement.
-        stop_radius (float): The radius within which the mouse cursor will stop moving.
-        fps (int): The frames per second for the simulation.
-        normal_input_strength (float): The strength of normal mouse input.
-        toward_input_multiplier (float): Multiplier for input towards the center of gravity.
-        away_input_multiplier (float): Multiplier for input away from the center of gravity.
-        lateral_boost_enabled_by_default (bool): Whether lateral boost is enabled by default.
-        lateral_boost_multiplier (float): Multiplier for lateral boost input.
-        click_sequence_timeout (float): Timeout for recognizing click sequences.
-        logging_enabled_by_default (bool): Whether logging is enabled by default.
-        log_telemetry_hz (int): Frequency of telemetry logging in Hertz.
     """
 
     # --------------------------------------------------------
@@ -31,11 +17,9 @@ class MouseGravityConfig:
     # --------------------------------------------------------
 
     gravity: float = 2000.0
-
     reference_distance: float = 300.0
     gravity_distance_power: float = 1.5
-
-    min_gravity_distance: float = 40.0
+    min_gravity_distance: float = 25.0
     max_gravity_acceleration: float = 6000.0
 
     # --------------------------------------------------------
@@ -44,22 +28,45 @@ class MouseGravityConfig:
 
     max_speed: float = 2500.0
     drag: float = 0.9999
-
     stop_radius: float = 5.0
-
     fps: int = 120
 
     # --------------------------------------------------------
     # Physical mouse input
     # --------------------------------------------------------
 
-    normal_input_strength: float = 10.0
-
+    normal_input_strength: float = 7.0
     toward_input_multiplier: float = 1.0
     away_input_multiplier: float = 0.35
-
     lateral_boost_enabled_by_default: bool = False
     lateral_boost_multiplier: float = 2.0
+
+    # --------------------------------------------------------
+    # Multi-point gravity
+    # --------------------------------------------------------
+
+    # Number of points the user can place in multi-point mode.
+    # This is validated against MAX_GRAVITY_POINTS in the UI.
+    multi_point_count: int = 5
+
+    # Gravity points attract each other at a much weaker strength
+    # than they attract the cursor.
+    point_gravity_multiplier: float = 0.002
+    point_drag: float = 0.9
+    point_max_speed: float = 100.0
+
+
+    # --------------------------------------------------------
+    # N-body placement presets
+    # --------------------------------------------------------
+
+    # Distance from the cursor to each spawned point.
+    triangle_spawn_radius: float = 200.0
+    pentagram_spawn_radius: float = 200.0
+
+    # Delay after pressing an N-body preset button.
+    # This gives the user time to move the cursor to the desired center point.
+    n_body_spawn_delay: float = 3.0
 
     # --------------------------------------------------------
     # Click recognition
@@ -72,7 +79,7 @@ class MouseGravityConfig:
     # --------------------------------------------------------
 
     logging_enabled_by_default: bool = True
-    log_telemetry_hz: int = 1
+    log_telemetry_hz: int = 5
 
 
 config = MouseGravityConfig()
@@ -169,5 +176,4 @@ PRESETS = {
         "away_input_multiplier": 0.35,
         "lateral_boost_multiplier": 2.0,
     },
-    
 }

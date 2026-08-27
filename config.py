@@ -38,8 +38,6 @@ class MouseGravityConfig:
     normal_input_strength: float = 7.0
     toward_input_multiplier: float = 1.0
     away_input_multiplier: float = 0.35
-    lateral_boost_enabled_by_default: bool = False
-    lateral_boost_multiplier: float = 2.0
 
     # --------------------------------------------------------
     # Multi-point gravity
@@ -52,8 +50,11 @@ class MouseGravityConfig:
     # Gravity points attract each other at a much weaker strength
     # than they attract the cursor.
     point_gravity_multiplier: float = 0.002
-    point_drag: float = 0.9
+    point_drag: float = 0.99
     point_max_speed: float = 100.0
+
+    body_stop_radius: float = 5.0
+
 
 
     # --------------------------------------------------------
@@ -61,8 +62,8 @@ class MouseGravityConfig:
     # --------------------------------------------------------
 
     # Distance from the cursor to each spawned point.
-    triangle_spawn_radius: float = 200.0
-    pentagram_spawn_radius: float = 200.0
+    triangle_spawn_radius: float = 300.0
+    pentagram_spawn_radius: float = 300.0
 
     # Delay after pressing an N-body preset button.
     # This gives the user time to move the cursor to the desired center point.
@@ -99,7 +100,6 @@ PRESETS = {
         "normal_input_strength": 10.0,
         "toward_input_multiplier": 1.0,
         "away_input_multiplier": 0.4,
-        "lateral_boost_multiplier": 4.0,
     },
     "Stable Orbit": {
         "gravity": 2000.0,
@@ -114,7 +114,6 @@ PRESETS = {
         "normal_input_strength": 10.0,
         "toward_input_multiplier": 1.0,
         "away_input_multiplier": 0.25,
-        "lateral_boost_multiplier": 4.0,
     },
     "Heavy Gravity": {
         "gravity": 5000.0,
@@ -129,7 +128,6 @@ PRESETS = {
         "normal_input_strength": 10.0,
         "toward_input_multiplier": 1.0,
         "away_input_multiplier": 0.2,
-        "lateral_boost_multiplier": 2.0,
     },
     "Light Gravity": {
         "gravity": 1000.0,
@@ -144,36 +142,47 @@ PRESETS = {
         "normal_input_strength": 10.0,
         "toward_input_multiplier": 1.0,
         "away_input_multiplier": 0.5,
-        "lateral_boost_multiplier": 3.0,
     },
     "Eccentic": {
-        "gravity": 2500.0,
+        "gravity": 3000.0,
         "reference_distance": 300.0,
-        "gravity_distance_power": 1.5,
+        "gravity_distance_power": 2,
         "min_gravity_distance": 40.0,
         "max_gravity_acceleration": 6000.0,
         "max_speed": 3000.0,
         "drag": 0.9999,
-        "stop_radius": 5.0,
+        "stop_radius": 1.0,
         "fps": 120,
         "normal_input_strength": 10.0,
         "toward_input_multiplier": 1.0,
         "away_input_multiplier": 0.35,
-        "lateral_boost_multiplier": 2.0,
     },
     "Thick Atmosphere": {
-        "gravity": 2000.0,
-        "reference_distance": 300.0,
-        "gravity_distance_power": 1.5,
-        "min_gravity_distance": 40.0,
-        "max_gravity_acceleration": 6000.0,
+        "gravity": 4000.0,
+        "reference_distance": 500.0,
+        "gravity_distance_power": 1.25,
+        "min_gravity_distance": 100.0,
+        "max_gravity_acceleration": 4000.0,
         "max_speed": 1500.0,
-        "drag": 0.9,
+        "drag": 0.99,
         "stop_radius": 5.0,
         "fps": 120,
         "normal_input_strength": 10.0,
         "toward_input_multiplier": 1.0,
         "away_input_multiplier": 0.35,
-        "lateral_boost_multiplier": 2.0,
     },
+    "Sicko Mode": {
+        "gravity": 10_000.0,
+        "reference_distance": 75.0,
+        "gravity_distance_power": 25,
+        "min_gravity_distance": 1.0,
+        "max_gravity_acceleration": 60_000.0,
+        "max_speed": 50_000.0,
+        "drag": 0.999999,
+        "stop_radius": 1.0,
+        "fps": 120,
+        "normal_input_strength": 20.0,
+        "toward_input_multiplier": 1.0,
+        "away_input_multiplier": 0.30,
+        }
 }

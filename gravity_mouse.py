@@ -1,5 +1,4 @@
 import ctypes
-
 # DPI awareness must be initialized before mouse/display-dependent modules.
 try:
     ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
@@ -21,8 +20,8 @@ import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 
-import pystray
 
+import pystray
 from PIL import Image, ImageDraw
 from pynput import mouse
 
@@ -51,7 +50,6 @@ gravity_points = []
 velocity_x = 0.0
 velocity_y = 0.0
 
-lateral_boost = config.lateral_boost_enabled_by_default
 orbit_direction = 1
 
 click_count = 0
@@ -152,7 +150,6 @@ print(
 )
 
 
-
 # Cache frequently used Win32 function lookups.
 GET_ANCESTOR = user32.GetAncestor
 GET_ANCESTOR.argtypes = [
@@ -192,7 +189,6 @@ SET_WINDOW_LONG.argtypes = [
 SET_WINDOW_LONG.restype = ctypes.c_long
 
 GA_ROOT = 2
-
 
 
 # ------------------------------------------------------------
@@ -302,12 +298,10 @@ def log_configuration():
         "CONFIG | "
         "normal_input_strength=%s | "
         "toward_input_multiplier=%s | "
-        "away_input_multiplier=%s | "
-        "lateral_boost_multiplier=%s",
+        "away_input_multiplier=%s | ",
         config.normal_input_strength,
         config.toward_input_multiplier,
         config.away_input_multiplier,
-        config.lateral_boost_multiplier,
     )
 
     logger.info(
@@ -459,11 +453,7 @@ def _get_marker_hwnd(marker):
         GA_ROOT,
     )
 
-    return (
-        root_hwnd
-        if root_hwnd
-        else client_hwnd
-    )
+    return root_hwnd if root_hwnd else client_hwnd
 
 
 def _make_marker_click_through(marker):
@@ -480,9 +470,7 @@ def _make_marker_click_through(marker):
     SET_WINDOW_LONG(
         hwnd,
         GWL_EXSTYLE,
-        current_style
-        | WS_EX_TRANSPARENT
-        | WS_EX_TOOLWINDOW,
+        current_style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
     )
 
 
@@ -598,8 +586,7 @@ def _show_or_move_marker(
         marker_y,
         MARKER_SIZE,
         MARKER_SIZE,
-        SWP_NOACTIVATE
-        | SWP_SHOWWINDOW,
+        SWP_NOACTIVATE | SWP_SHOWWINDOW,
     )
 
     target_marker_positions[index] = marker_position
@@ -615,6 +602,16 @@ def _hide_marker(index):
     target_markers[index].withdraw()
     target_marker_visible[index] = False
     target_marker_positions[index] = None
+    # if gravity_points:
+    #     gravity_points.pop(index)
+    #     logger.info(
+    #         "GRAVITY POINTS"
+    #         " | "
+    #         "REMOVED"
+    #         " | "
+    #         "Gravity Point: %s",
+    #         index
+    #         )
 
 
 def update_target_markers():
@@ -676,10 +673,16 @@ def destroy_target_markers():
 # ------------------------------------------------------------
 
 
-def create_vortex_icon(
-    size=64,
-    boost_active=False,
-):
+def create_vortex_icon(size=64):
+    """
+    Create a swirling vortex tray icon.
+
+    Args:
+        size (int): The size of the icon in pixels (width and height).
+
+    Returns:
+        PIL.Image: The generated vortex icon image.
+    """
     image = Image.new(
         "RGBA",
         (size, size),
@@ -738,95 +741,6 @@ def create_vortex_icon(
         ),
     )
 
-    if boost_active:
-        badge_background = (
-            200,
-            200,
-            200,
-            255,
-        )
-
-        green = (
-            0,
-            150,
-            35,
-            255,
-        )
-
-        outline = (
-            0,
-            50,
-            10,
-            255,
-        )
-
-        box_left = int(size * 0.50)
-        box_top = int(size * -0.04)
-        box_right = int(size * 1.02)
-        box_bottom = int(size * 0.50)
-
-        draw.rectangle(
-            (
-                box_left,
-                box_top,
-                box_right,
-                box_bottom,
-            ),
-            fill=badge_background,
-        )
-
-        badge_width = box_right - box_left
-        badge_height = box_bottom - box_top
-
-        arrow_center_x = box_left + badge_width / 2
-
-        arrow_top = box_top + badge_height * 0.05
-        arrow_bottom = box_bottom - badge_height * 0.05
-        head_half_width = badge_width * 0.70 / 2
-        head_bottom = arrow_top + badge_height * 0.40
-        shaft_half_width = badge_width * 0.30 / 2
-
-        arrow_points = [
-            (
-                arrow_center_x,
-                arrow_top,
-            ),
-            (
-                arrow_center_x + head_half_width,
-                head_bottom,
-            ),
-            (
-                arrow_center_x + shaft_half_width,
-                head_bottom,
-            ),
-            (
-                arrow_center_x + shaft_half_width,
-                arrow_bottom,
-            ),
-            (
-                arrow_center_x - shaft_half_width,
-                arrow_bottom,
-            ),
-            (
-                arrow_center_x - shaft_half_width,
-                head_bottom,
-            ),
-            (
-                arrow_center_x - head_half_width,
-                head_bottom,
-            ),
-        ]
-
-        draw.polygon(
-            arrow_points,
-            fill=green,
-            outline=outline,
-            width=max(
-                1,
-                int(badge_width * 0.05),
-            ),
-        )
-
     return image
 
 
@@ -842,33 +756,15 @@ def toggle_logging(
     icon.update_menu()
 
 
-def toggle_lateral_boost(
-    icon,
-    item,
-):
-    global lateral_boost
-
-    with state_lock:
-        lateral_boost = not lateral_boost
-
-        boost_active = lateral_boost
-
-    if logging_enabled:
-        logger.info(
-            "BOOST | state=%s | source=tray",
-            "ON" if boost_active else "OFF",
-        )
-
-    update_tray_status()
-
-    icon.update_menu()
-
-
 def open_log_folder(
     icon,
     item,
 ):
+    """
+    Open the directory where Mouse Gravity logs are stored.
+    """
     os.startfile(get_log_directory())
+
 
 
 def update_tray_status():
@@ -876,18 +772,13 @@ def update_tray_status():
         return
 
     with state_lock:
-        boost_active = lateral_boost
         current_mode = gravity_mode
-
-    boost_state = "ON" if boost_active else "OFF"
 
     mode_name = "MULTI" if current_mode == GRAVITY_MODE_MULTI else "SINGLE"
 
-    tray_icon.title = (
-        "Mouse Gravity: ACTIVE | " f"Mode: {mode_name} | " f"Boost: {boost_state}"
-    )
+    tray_icon.title = "Mouse Gravity: ACTIVE | " f"Mode: {mode_name}"
 
-    tray_icon.icon = create_vortex_icon(boost_active=boost_active)
+    tray_icon.icon = create_vortex_icon()
 
 
 def show_settings_window(
@@ -947,16 +838,22 @@ def tray_exit(
     icon,
     item,
 ):
+    """
+    Callback function for the "Exit" menu item in the tray icon's context menu.
+    Args:
+        icon (pystray.Icon): The tray icon object.
+        item (pystray.MenuItem): The menu item that was clicked.
+    """
     if logging_enabled:
         logger.info("EXIT | tray menu")
 
     shutdown()
 
 
-
 # ------------------------------------------------------------
 # n-Body Presets
 # ------------------------------------------------------------
+
 
 def spawn_triangle_preset():
     """
@@ -980,21 +877,12 @@ def spawn_triangle_preset():
     start_angle = -math.pi / 2
 
     for index in range(3):
-        angle = (
-            start_angle
-            + index * (2 * math.pi / 3)
-        )
+        angle = start_angle + index * (2 * math.pi / 3)
 
         points.append(
             GravityPoint(
-                x=(
-                    cursor_x
-                    + math.cos(angle) * radius
-                ),
-                y=(
-                    cursor_y
-                    + math.sin(angle) * radius
-                ),
+                x=(cursor_x + math.cos(angle) * radius),
+                y=(cursor_y + math.sin(angle) * radius),
             )
         )
 
@@ -1010,15 +898,12 @@ def spawn_triangle_preset():
 
     if logging_enabled:
         logger.info(
-            "N_BODY_PRESET | "
-            "preset=triangle | "
-            "radius=%s",
+            "N_BODY_PRESET | " "preset=triangle | " "radius=%s",
             radius,
         )
 
-    print(
-        f"Spawned triangle preset at radius {radius}."
-    )
+    print(f"Spawned triangle preset at radius {radius}.")
+
 
 def spawn_pentagram_preset():
     """
@@ -1042,21 +927,12 @@ def spawn_pentagram_preset():
     start_angle = -math.pi / 2
 
     for index in range(5):
-        angle = (
-            start_angle
-            + index * (2 * math.pi / 5)
-        )
+        angle = start_angle + index * (2 * math.pi / 5)
 
         points.append(
             GravityPoint(
-                x=(
-                    cursor_x
-                    + math.cos(angle) * radius
-                ),
-                y=(
-                    cursor_y
-                    + math.sin(angle) * radius
-                ),
+                x=(cursor_x + math.cos(angle) * radius),
+                y=(cursor_y + math.sin(angle) * radius),
             )
         )
 
@@ -1072,15 +948,12 @@ def spawn_pentagram_preset():
 
     if logging_enabled:
         logger.info(
-            "N_BODY_PRESET | "
-            "preset=pentagram | "
-            "radius=%s",
+            "N_BODY_PRESET | " "preset=pentagram | " "radius=%s",
             radius,
         )
 
-    print(
-        f"Spawned pentagram preset at radius {radius}."
-    )
+    print(f"Spawned pentagram preset at radius {radius}.")
+
 
 # ------------------------------------------------------------
 # Click handling
@@ -1096,7 +969,13 @@ def process_click_sequence(
 
     Double-click places a target. In multi-point mode placement stops at
     the smaller of the configured limit and the hard five-point maximum.
+
     Triple-click clears the active target set.
+
+    Args:
+        x (float): The x coordinate of the mouse.
+        y (float): The y coordinate of the mouse.
+
     """
     global click_count
     global click_timer
@@ -1232,6 +1111,15 @@ def on_click(
     button,
     pressed,
 ):
+    """
+    Callback function for mouse click events.
+
+    Args:
+        x (int): The x-coordinate of the mouse click.
+        y (int): The y-coordinate of the mouse click.
+        button (pynput.mouse.Button): The mouse button that was clicked.
+        pressed (bool): True if the button was pressed, False if released.
+    """
     global click_count
     global last_click_time
     global click_timer
@@ -1290,7 +1178,6 @@ def apply_user_input(
     user_dy,
     radial_x,
     radial_y,
-    boost_active,
 ):
     """
     Apply physical mouse movement to the simulated cursor velocity.
@@ -1343,22 +1230,9 @@ def apply_user_input(
 
     # --------------------------------------------------------
     # Tangential input
-    #
-    # Lateral boost only amplifies actual sideways
-    # mouse movement.
-    # --------------------------------------------------------
-
-    # --------------------------------------------------------
-    # Tangential input
-    #
-    # Lateral boost only amplifies actual sideways
-    # mouse movement.
     # --------------------------------------------------------
 
     tangential_strength = config.normal_input_strength
-
-    if boost_active:
-        tangential_strength *= config.lateral_boost_multiplier
 
     velocity_x += tangent_x * tangential_input * tangential_strength
 
@@ -1385,53 +1259,100 @@ def clamp_cursor_to_desktop(
     # Virtual desktop edge collisions
     # --------------------------------------------------------
 
+    def bounce_velocity(v1: float = 0.0):
+        # print(v1)
+
+        # Store the sign we want
+        if v1 < 0:
+            v2_sign = 1
+        else:
+            v2_sign = -1
+
+        # Since we stored the sign, we need to remove it from v1
+        v1 = abs(v1)
+
+        # Divide v1 by gravity, or 2000, whichever is lower
+        v2 = v1 / min(config.gravity, 2000)
+        
+        # Ensure the bouce velocity is at least 1
+        v2 = max(v2, 1.0)
+
+        # Recombine with the sign to get a slightly bouncy v2 effect
+        # print(v2 * v2_sign)
+        return v2 * v2_sign
+
+    # TESTING BOUNCE BEHAVIOUR
+    # 0.1 is too much bounce, I just want to change the vector more than just removing one axis
+    # 0.05 is still to much for some situations, maybe take the axis value and divide it by the some relative gravity setting and flip the sign?
+    # bounce_velocity still needs tweaks, but is okay for now
+
     if new_x <= SCREEN_LEFT:
         new_x = SCREEN_LEFT
 
         if velocity_x < 0:
+            v2 = bounce_velocity(velocity_x)
             if logging_enabled:
                 logger.info(
-                    "COLLISION | wall=LEFT | " "lost_velocity_x=%.2f",
+                    "COLLISION | wall=LEFT | "
+                    "velocity_x_1=%.2f"
+                    "|"
+                    "velocity_x_2=%.2f",
                     velocity_x,
+                    v2,
                 )
 
-            velocity_x = 0.0
+            velocity_x = v2
 
     elif new_x >= SCREEN_RIGHT:
         new_x = SCREEN_RIGHT
 
         if velocity_x > 0:
+            v2 = bounce_velocity(velocity_x)
             if logging_enabled:
                 logger.info(
-                    "COLLISION | wall=RIGHT | " "lost_velocity_x=%.2f",
+                    "COLLISION | wall=RIGHT | "
+                    "velocity_x_1=%.2f"
+                    "|"
+                    "velocity_x_2=%.2f",
                     velocity_x,
+                    v2,
                 )
 
-            velocity_x = 0.0
+            velocity_x = v2
 
     if new_y <= SCREEN_TOP:
         new_y = SCREEN_TOP
 
         if velocity_y < 0:
+            v2 = bounce_velocity(velocity_y)
             if logging_enabled:
                 logger.info(
-                    "COLLISION | wall=TOP | " "lost_velocity_y=%.2f",
+                    "COLLISION | wall=TOP | "
+                    "velocity_y_1=%.2f"
+                    "|"
+                    "velocity_y_2=%.2f",
                     velocity_y,
+                    v2,
                 )
 
-            velocity_y = 0.0
+            velocity_y = v2
 
     elif new_y >= SCREEN_BOTTOM:
         new_y = SCREEN_BOTTOM
 
         if velocity_y > 0:
+            v2 = bounce_velocity(velocity_y)
             if logging_enabled:
                 logger.info(
-                    "COLLISION | wall=BOTTOM | " "lost_velocity_y=%.2f",
+                    "COLLISION | wall=BOTTOM | "
+                    "velocity_y_1=%.2f"
+                    " | "
+                    "velocity_y_2=%.2f",
                     velocity_y,
+                    v2,
                 )
 
-            velocity_y = 0.0
+            velocity_y = v2
 
     return (
         new_x,
@@ -1464,6 +1385,7 @@ def gravity_loop():
     global velocity_x
     global velocity_y
     global last_frame_error
+    global gravity_points
 
     previous_time = time.perf_counter()
     last_point_update_time = previous_time
@@ -1500,7 +1422,6 @@ def gravity_loop():
         with state_lock:
             current_mode = gravity_mode
             current_target = target
-            boost_active = lateral_boost
 
             if current_mode == GRAVITY_MODE_MULTI:
                 # Enforce the configured limit immediately if the user
@@ -1626,12 +1547,24 @@ def gravity_loop():
                     # Point-to-point attraction only needs a 30 Hz update.
                     # The cursor still reads the latest positions every
                     # cursor frame.
+
+                    # THIS IS WHERE THE GRAVITY_POINTS CAN BE REMOVED
                     if point_count >= 2 and point_elapsed >= POINT_PHYSICS_INTERVAL:
-                        update_gravity_points(
+                        removed_point = update_gravity_points(
                             gravity_points,
                             min(point_elapsed, 0.1),
                             SCREEN_BOUNDS,
                         )
+
+                        if removed_point is not None and logging_enabled:
+                            logger.info(
+                                "GRAVITY POINTS"
+                                " | "
+                                "REMOVED"
+                                " | "
+                                "Gravity Point: %s",
+                                removed_point,
+                            )
 
                         last_point_update_time = current_time
 
@@ -1686,7 +1619,6 @@ def gravity_loop():
                     user_dy,
                     radial_x,
                     radial_y,
-                    boost_active,
                 )
 
                 # ------------------------------------------------
@@ -1704,10 +1636,13 @@ def gravity_loop():
                 # Maximum speed
                 # ------------------------------------------------
 
+                # Speed^2 is Vx^2 + Vy^2
                 speed_squared = velocity_x * velocity_x + velocity_y * velocity_y
 
                 max_speed_squared = config.max_speed * config.max_speed
 
+                # NOTE TO ME: do I want this?
+                # I'm trying to a bounce and this might be messing it up
                 # Avoid sqrt unless clamping is actually required.
                 if speed_squared > max_speed_squared:
                     speed = math.sqrt(speed_squared)
@@ -1766,8 +1701,7 @@ def gravity_loop():
                         "speed=%.2f | "
                         "user_input=(%.2f, %.2f) | "
                         "radial_input=%.2f | "
-                        "tangential_input=%.2f | "
-                        "boost=%s",
+                        "tangential_input=%.2f | ",
                         current_mode,
                         actual_x,
                         actual_y,
@@ -1780,7 +1714,6 @@ def gravity_loop():
                         user_dy,
                         radial_input,
                         tangential_input,
-                        boost_active,
                     )
 
             else:
@@ -1793,40 +1726,46 @@ def gravity_loop():
         except Exception as exc:
             consecutive_errors += 1
 
-            if not last_frame_error or last_frame_error != str(exc):
-                print(f"An error has occurred: {exc}.")
+            try:
+                if not last_frame_error or last_frame_error != str(exc):
+                    print(f"An error has occurred: {exc}.")
 
-                print("Skipping frame.")
+                    print("Skipping frame.")
 
-            elif telemetry_interval is not None and (
-                current_time - last_telemetry_time >= telemetry_interval
-            ):
-                print(f"An error is still occurring: {exc}.")
+                elif telemetry_interval is not None and (
+                    current_time - last_telemetry_time >= telemetry_interval
+                ):
+                    print(f"An error is still occurring: {exc}.")
 
-            if consecutive_errors >= 5:
-                print("Too many consecutive errors: " f"{consecutive_errors}")
+                if consecutive_errors >= 5:
+                    print("Too many consecutive errors: " f"{consecutive_errors}")
 
-                print("Exiting...")
+                    print("Exiting...")
 
-                if logging_enabled:
-                    logger.info("EXIT | Error Override")
+                    if logging_enabled:
+                        logger.info("EXIT | Error Override")
 
-                shutdown()
+                    shutdown()
 
-            last_frame_error = str(exc)
+                last_frame_error = str(exc)
 
-            if (
-                logging_enabled
-                and telemetry_interval is not None
-                and (current_time - last_telemetry_time >= telemetry_interval)
-            ):
-                last_telemetry_time = current_time
+                if (
+                    logging_enabled
+                    and telemetry_interval is not None
+                    and (current_time - last_telemetry_time >= telemetry_interval)
+                ):
+                    last_telemetry_time = current_time
 
-                logger.error(
-                    "An ERROR occurred: %s",
-                    exc,
-                    exc_info=True,
+                    logger.error(
+                        "An ERROR occurred: %s",
+                        exc,
+                        exc_info=True,
+                    )
+            except Exception as e:
+                print(
+                    f"An error: {e} - has occurred during the error handling code. Oh the irony."
                 )
+                raise e
 
         finally:
             # Account for time already spent calculating the frame instead
@@ -1857,8 +1796,10 @@ def main():
     global tk_root
     global settings_ui
 
-    section = ""
+    # Don't need this, just initialize with first section name
+    # # section = ""
 
+    # LOGGING STARTUP
     section = "Logging Startup"
 
     try:
@@ -1867,6 +1808,7 @@ def main():
     except Exception as exc:
         print(f"Error {exc} happened during: {section}")
 
+    # MOUSE LISTENER INITIALIZATION
     section = "Mouse Listener Initialization"
 
     try:
@@ -1878,6 +1820,7 @@ def main():
     except Exception as exc:
         print(f"Error {exc} happened during: {section}")
 
+    # PHYSICS THREAD INITIALIZATION
     section = "Physics Thread Initialization"
 
     try:
@@ -1891,6 +1834,7 @@ def main():
     except Exception as exc:
         print(f"Error {exc} happened during: {section}")
 
+    # POP-UP WINDOW CREATION
     section = "Pop-up Window Creation"
 
     try:
@@ -1916,26 +1860,19 @@ def main():
     except Exception as exc:
         print(f"Error {exc} happened during: {section}")
 
+    # SYSTEM TRAY ICON POPULATION
     section = "Tray Icon Population"
 
     try:
         tray_icon = pystray.Icon(
             "mouse_gravity",
-            create_vortex_icon(
-                boost_active=False,
-            ),
-            "Mouse Gravity: ACTIVE | Mode: SINGLE | Boost: OFF",
+            create_vortex_icon(),
+            "Mouse Gravity: ACTIVE | Mode: SINGLE",
             menu=pystray.Menu(
                 pystray.MenuItem(
                     "Mouse Gravity: ACTIVE",
                     lambda icon, item: None,
                     enabled=False,
-                ),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem(
-                    "Lateral Boost",
-                    toggle_lateral_boost,
-                    checked=lambda item: lateral_boost,
                 ),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(

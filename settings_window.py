@@ -44,7 +44,6 @@ CLASSIC_FIELDS = [
     # "normal_input_strength",
     # "toward_input_multiplier",
     # "away_input_multiplier",
-    # "lateral_boost_multiplier",
     # "click_sequence_timeout",
     # "log_telemetry_hz",
 ]
@@ -785,6 +784,21 @@ class SettingsWindow:
             sticky="w",
             padx=5,
             pady=(0, 10),
+        )
+
+        # row += 1
+
+        ttk.Button(
+            n_body_button_frame,
+            text="Abort",
+            command=lambda: (
+                self.cancel_n_body_spawn(
+                    True
+                )
+            ),
+        ).pack(
+            side="right",
+            padx=5,
         )
 
         row += 1

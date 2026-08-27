@@ -55,6 +55,7 @@ def gravity_vector(
     target_x: float,
     target_y: float,
     multiplier: float = 1.0,
+    body_calculation: bool = False,
 ) -> tuple[float, float, float]:
     """
     Calculate acceleration from one position toward another.
@@ -70,12 +71,21 @@ def gravity_vector(
         A tuple containing acceleration_x, acceleration_y, and the
         gravity magnitude.
     """
+    # print("Hi! this is the gravity vector function")
     dx = target_x - source_x
     dy = target_y - source_y
 
     distance = math.hypot(dx, dy)
 
     # Stop applying gravity inside the configured target radius.
+    # Check it its a body calculation so it uses the right config value
+    if body_calculation:
+        if distance <= config.body_stop_radius:
+            # print("body should be removed")
+            # print(f"distance = {distance}")
+            return 0.0, 0.0, math.pi  # Returning pi makes it unlikely to accidentally activate the part that will remove the point
+
+
     if distance <= config.stop_radius:
         return 0.0, 0.0, 0.0
 
@@ -85,6 +95,12 @@ def gravity_vector(
     )
 
     inverse_distance = 1.0 / distance
+
+    # print(dx * inverse_distance * gravity_strength)
+    # print(dy * inverse_distance * gravity_strength)
+    # print(gravity_strength)
+    
+
 
     return (
         dx * inverse_distance * gravity_strength,
@@ -167,7 +183,7 @@ def update_gravity_points(
     points: list[GravityPoint],
     dt: float,
     bounds: tuple[float, float, float, float],
-) -> None:
+) -> GravityPoint | None:
     """
     Advance the gravity points under weak mutual attraction.
 
@@ -179,11 +195,14 @@ def update_gravity_points(
         points: Mutable gravity points to update.
         dt: Elapsed simulation time for this point-physics step.
         bounds: Virtual desktop bounds as left, top, right, bottom.
+
+    Returns:
+        The removed gravity point if two points merged, otherwise None.
     """
     point_count = len(points)
 
     if point_count < 2:
-        return
+        return None
 
     # Two flat lists are cheaper than allocating nested [x, y] lists.
     acceleration_x = [0.0] * point_count
@@ -197,13 +216,18 @@ def update_gravity_points(
         for j in range(i + 1, point_count):
             other = points[j]
 
-            pair_ax, pair_ay, _ = gravity_vector(
+            pair_ax, pair_ay, remove_point = gravity_vector(
                 point.x,
                 point.y,
                 other.x,
                 other.y,
                 multiplier=config.point_gravity_multiplier,
+                body_calculation=True,
             )
+
+            if remove_point == math.pi:
+                removed_point = points.pop(i)
+                return removed_point
 
             acceleration_x[i] += pair_ax
             acceleration_y[i] += pair_ay
@@ -268,3 +292,5 @@ def update_gravity_points(
 
             if point.velocity_y > 0:
                 point.velocity_y = 0.0
+
+    return None

@@ -1,5 +1,7 @@
 import ctypes
 
+# This accouts for high-DPI displays.
+# DPI is Dots Per Inch. Think Windows scaling. If you have a 4K monitor, Windows will scale it to 150% or 200% by default.
 try:
     ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
 except Exception:
@@ -64,33 +66,38 @@ controller = mouse.Controller()  # Controller object for controlling the mouse c
 tray_icon = (
     None  # Tray icon object for the system tray, or None if no tray icon is created
 )
-listener = None  # Mouse listener object for detecting mouse clicks, or None if no listener is created
+listener = None 
 
-tk_root = None  # Tkinter root window for the settings UI, or None if no root window is created
-settings_ui = None  # SettingsWindow object for the settings UI, or None if no settings UI is created
+tk_root = None 
+settings_ui = None  
+
+last_frame_error = ""  
 
 
 # ------------------------------------------------------------
 # Logging state
 # ------------------------------------------------------------
 
-logging_enabled = False
-log_handler = None
-log_path = None
+logging_enabled = False 
+log_handler = None  
+log_path = None 
 
-logging_lock = threading.Lock()
+logging_lock = threading.Lock() 
 
-logger = logging.getLogger("mouse_gravity")
-logger.setLevel(logging.DEBUG)
-logger.propagate = False
+logger = logging.getLogger("mouse_gravity") 
+logger.setLevel(logging.DEBUG)  
+logger.propagate = False    
 
 
 # ------------------------------------------------------------
 # Virtual desktop bounds
 # ------------------------------------------------------------
 
+# Get the virtual desktop bounds using Windows API calls to account for multiple monitors and different resolutions.
 user32 = ctypes.windll.user32
 
+# These constants are used to retrieve the virtual screen dimensions from the Windows API.
+# Don't change these values unless you know what you're doing, as they correspond to specific system metrics.
 SM_XVIRTUALSCREEN = 76
 SM_YVIRTUALSCREEN = 77
 SM_CXVIRTUALSCREEN = 78
@@ -122,11 +129,11 @@ def get_log_directory():
     Return the directory where Mouse Gravity logs are stored.
 
     Creates the directory automatically if it does not exist.
+
+    Returns:
+        Path: The path to the log directory.
     """
-    log_directory = (
-        Path(__file__).resolve().parent
-        / "logs"
-    )
+    log_directory = Path(__file__).resolve().parent / "logs"
 
     log_directory.mkdir(
         parents=True,
@@ -135,10 +142,11 @@ def get_log_directory():
 
     return log_directory
 
+
 def start_logging():
     """
     Start logging to a file.
-    
+
     This function initializes logging by creating a log file with a timestamped name,
     setting up a file handler, and configuring the logger to write log messages to the file.
     """
@@ -146,18 +154,14 @@ def start_logging():
     global log_handler
     global log_path
 
+    # Prevent multiple threads from starting logging simultaneously.
     with logging_lock:
         if log_handler is not None:
             return
 
-        timestamp = datetime.now().strftime(
-            "%Y-%m-%d_%H-%M-%S"
-        )
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        log_path = (
-            get_log_directory()
-            / f"mouse_gravity_{timestamp}.log"
-        )
+        log_path = get_log_directory() / f"mouse_gravity_{timestamp}.log"
 
         log_handler = logging.FileHandler(
             log_path,
@@ -167,9 +171,7 @@ def start_logging():
         log_handler.setLevel(logging.DEBUG)
 
         formatter = logging.Formatter(
-            "%(asctime)s.%(msecs)03d | "
-            "%(levelname)-8s | "
-            "%(message)s",
+            "%(asctime)s.%(msecs)03d | " "%(levelname)-8s | " "%(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
@@ -184,6 +186,7 @@ def start_logging():
 
     print(f"Logging enabled: {log_path}")
 
+
 def stop_logging():
     """
     Stop logging and close the log file.
@@ -194,6 +197,7 @@ def stop_logging():
     global logging_enabled
     global log_handler
 
+    # Prevent multiple threads from stopping logging simultaneously.
     with logging_lock:
         if log_handler is None:
             logging_enabled = False
@@ -221,8 +225,10 @@ def log_configuration():
     This function logs the values of various configuration parameters
     related to gravity, momentum, physical mouse input, and click recognition.
     """
+    # Header
     logger.info("Mouse Gravity started")
 
+    # Configuration values
     logger.info(
         "CONFIG | "
         "gravity=%s | "
@@ -237,6 +243,7 @@ def log_configuration():
         config.max_gravity_acceleration,
     )
 
+    # Momentum values
     logger.info(
         "CONFIG | " "max_speed=%s | " "drag=%s | " "stop_radius=%s | " "fps=%s",
         config.max_speed,
@@ -245,6 +252,7 @@ def log_configuration():
         config.fps,
     )
 
+    # Physical mouse input values
     logger.info(
         "CONFIG | "
         "normal_input_strength=%s | "
@@ -327,6 +335,7 @@ def create_vortex_icon(size=64, boost_active=False):
     # Green boost arrow
     # --------------------------------------------------------
 
+    # This might end up being removed along with the lateral boost feature.
     if boost_active:
         badge_background = (200, 200, 200, 255)
         green = (0, 150, 35, 255)
@@ -476,6 +485,7 @@ def toggle_lateral_boost(icon, item):
     """
     global lateral_boost
 
+    # Prevent multiple threads from toggling the boost state simultaneously.
     with state_lock:
         lateral_boost = not lateral_boost
         boost_active = lateral_boost
@@ -509,6 +519,7 @@ def update_tray_status():
     if tray_icon is None:
         return
 
+    # Prevent multiple threads from reading the boost state simultaneously.
     with state_lock:
         boost_active = lateral_boost
 
@@ -604,6 +615,10 @@ def process_click_sequence(x, y):
     """
     Process the click sequence based on the number of clicks detected.
 
+    Single click is ignored.
+    Double click sets a new gravity target.
+    Triple click removes the target.
+
     Args:
         x (int): The x-coordinate of the mouse click.
         y (int): The y-coordinate of the mouse click.
@@ -616,19 +631,16 @@ def process_click_sequence(x, y):
     global velocity_x
     global velocity_y
 
+    # Initialize the click count and reset the click timer to None.
     with click_lock:
         count = click_count
         click_count = 0
         click_timer = None
 
+    # Do not process clicks if the program is not running.
+    # This prevents any click processing after a shutdown has been initiated.
     if not running.is_set():
         return
-
-    # --------------------------------------------------------
-    # Single click
-    #
-    # Toggle lateral boost.
-    # --------------------------------------------------------
 
     # --------------------------------------------------------
     # Double click
@@ -647,11 +659,14 @@ def process_click_sequence(x, y):
             y,
         )
 
+        # controller.position returns the current mouse position as a tuple (x, y).
         current_x, current_y = controller.position
 
+        # Calculate the difference between the new target position and the current mouse position.
         dx = x - current_x
         dy = y - current_y
 
+        # Get the hypotenuse distance
         distance = math.hypot(dx, dy)
 
         if distance > 0:
@@ -675,8 +690,7 @@ def process_click_sequence(x, y):
     # --------------------------------------------------------
 
     elif count == 3:
-
-        target = None  # (600, 0)
+        target = None 
         velocity_x = 0.0
         velocity_y = 0.0
         orbit_direction = 0
@@ -695,11 +709,15 @@ def on_click(x, y, button, pressed):
         y (int): The y-coordinate of the mouse click.
         button (pynput.mouse.Button): The mouse button that was clicked.
         pressed (bool): True if the button was pressed, False if released.
+
+    Returns:
+        bool: False if the program should exit, True otherwise.
     """
     global click_count
     global last_click_time
     global click_timer
 
+    
     if not pressed:
         return
 
@@ -748,13 +766,17 @@ def on_click(x, y, button, pressed):
 # Mouse physics
 # ------------------------------------------------------------
 
-
 def gravity_loop():
     """
     Main loop for simulating mouse gravity physics.
 
     This function runs in a separate thread and continuously updates the mouse cursor's position
     based on the current target, user input, and physics parameters.
+
+    If an error occurs during the calculations or mouse control, it will be logged and the loop will continue.
+
+    Raises:
+        Exception: If any error occurs during the physics calculations or mouse control.
     """
     global velocity_x
     global velocity_y
@@ -768,6 +790,9 @@ def gravity_loop():
     )
 
     last_telemetry_time = time.perf_counter()
+
+    # This initializes the counter to stop the program if there are too many errors in a row
+    consecutive_errors = 0
 
     # --------------------------------------------------------
     # Main loop
@@ -799,262 +824,343 @@ def gravity_loop():
         # ----------------------------------------------------
         # Gravity and physics
         # ----------------------------------------------------
-        if current_target is not None:
+        try:
+            global last_frame_error
+            if current_target is not None:
 
-            # Get the target coordinates from the current target.
-            target_x, target_y = current_target
+                # Get the target coordinates from the current target.
+                target_x, target_y = current_target
 
-            # Calculate the difference between the target position and the actual mouse position.
-            dx = target_x - actual_x
-            dy = target_y - actual_y
+                # Calculate the difference between the target position and the actual mouse position.
+                dx = target_x - actual_x
+                dy = target_y - actual_y
 
-            distance = math.hypot(dx, dy)
+                distance = math.hypot(dx, dy)
 
-            if distance > config.stop_radius:
+                if distance > config.stop_radius:
 
-                radial_x = dx / distance
-                radial_y = dy / distance
+                    radial_x = dx / distance
+                    radial_y = dy / distance
 
-                # ------------------------------------------------
-                # Distance-dependent gravity
-                #
-                # Gravity becomes stronger as the cursor gets
-                # closer to the target.
-                # ------------------------------------------------
+                    # ------------------------------------------------
+                    # Distance-dependent gravity
+                    #
+                    # Gravity becomes stronger as the cursor gets
+                    # closer to the target.
+                    # ------------------------------------------------
 
-                # Clamp the distance to a minimum value to avoid excessive gravity at very close distances.
-                gravity_distance = max(
-                    distance,
-                    config.min_gravity_distance,
-                )
-
-                # Calculate the gravity strength based on the distance to the target.
-                gravity_strength = (
-                    config.gravity
-                    * (config.reference_distance / gravity_distance)
-                    ** config.gravity_distance_power
-                )
-
-                # Clamp the gravity strength to a maximum value to prevent excessive acceleration.
-                gravity_strength = min(
-                    gravity_strength,
-                    config.max_gravity_acceleration,
-                )
-
-                # Set the acceleration components based on the radial direction and gravity strength.
-                acceleration_x = radial_x * gravity_strength
-                acceleration_y = radial_y * gravity_strength
-
-                # Velocity update based on acceleration and time step.
-                velocity_x += acceleration_x * dt
-                velocity_y += acceleration_y * dt
-
-                # ------------------------------------------------
-                # User movement
-                # ------------------------------------------------
-
-                # Radial unit vector points toward the target.
-                radial_x = dx / distance
-                radial_y = dy / distance
-
-                # Tangent is perpendicular to the radial direction.
-                tangent_x = -radial_y
-                tangent_y = radial_x
-
-                # ------------------------------------------------
-                # Split physical mouse movement into:
-                #
-                # 1. radial movement
-                # 2. tangential movement
-                # ------------------------------------------------
-
-                radial_input = user_dx * radial_x + user_dy * radial_y
-
-                tangential_input = user_dx * tangent_x + user_dy * tangent_y
-
-                # ------------------------------------------------
-                # Radial input
-                #
-                # Positive radial_input means the user moved
-                # toward the target.
-                #
-                # Negative means the user moved away.
-                # ------------------------------------------------
-
-                if radial_input >= 0:
-                    radial_strength = (
-                        config.normal_input_strength * config.toward_input_multiplier
+                    # Clamp the distance to a minimum value to avoid excessive gravity at very close distances.
+                    gravity_distance = max(
+                        distance,
+                        config.min_gravity_distance,
                     )
 
-                else:
-                    radial_strength = (
-                        config.normal_input_strength * config.away_input_multiplier
+                    # Calculate the gravity strength based on the distance to the target.
+                    gravity_strength = (
+                        config.gravity
+                        * (config.reference_distance / gravity_distance)
+                        ** config.gravity_distance_power
                     )
 
-                velocity_x += radial_x * radial_input * radial_strength
+                    # Clamp the gravity strength to a maximum value to prevent excessive acceleration.
+                    gravity_strength = min(
+                        gravity_strength,
+                        config.max_gravity_acceleration,
+                    )
 
-                velocity_y += radial_y * radial_input * radial_strength
+                    # Set the acceleration components based on the radial direction and gravity strength.
+                    acceleration_x = radial_x * gravity_strength
+                    acceleration_y = radial_y * gravity_strength
 
-                # ------------------------------------------------
-                # Tangential input
-                #
-                # Lateral boost only amplifies actual sideways
-                # mouse movement.
-                # ------------------------------------------------
+                    # Velocity update based on acceleration and time step.
+                    velocity_x += acceleration_x * dt
+                    velocity_y += acceleration_y * dt
 
-                tangential_strength = config.normal_input_strength
+                    # ------------------------------------------------
+                    # User movement
+                    # ------------------------------------------------
 
-                if boost_active:
-                    tangential_strength *= config.lateral_boost_multiplier
+                    # Radial unit vector points toward the target.
+                    radial_x = dx / distance
+                    radial_y = dy / distance
 
-                velocity_x += tangent_x * tangential_input * tangential_strength
+                    # Tangent is perpendicular to the radial direction.
+                    tangent_x = -radial_y
+                    tangent_y = radial_x
 
-                velocity_y += tangent_y * tangential_input * tangential_strength
+                    # ------------------------------------------------
+                    # Split physical mouse movement into:
+                    #
+                    # 1. radial movement
+                    # 2. tangential movement
+                    # ------------------------------------------------
 
-                # ------------------------------------------------
-                # Drag
-                # ------------------------------------------------
+                    radial_input = user_dx * radial_x + user_dy * radial_y
 
-                velocity_x *= config.drag
-                velocity_y *= config.drag
+                    tangential_input = user_dx * tangent_x + user_dy * tangent_y
 
-                # ------------------------------------------------
-                # Maximum speed
-                # ------------------------------------------------
+                    # ------------------------------------------------
+                    # Radial input
+                    #
+                    # Positive radial_input means the user moved
+                    # toward the target.
+                    #
+                    # Negative means the user moved away.
+                    # ------------------------------------------------
 
-                speed = math.hypot(
-                    velocity_x,
-                    velocity_y,
-                )
+                    if radial_input >= 0:
+                        radial_strength = (
+                            config.normal_input_strength
+                            * config.toward_input_multiplier
+                        )
 
-                if speed > config.max_speed:
+                    else:
+                        radial_strength = (
+                            config.normal_input_strength * config.away_input_multiplier
+                        )
 
-                    scale = config.max_speed / speed
+                    velocity_x += radial_x * radial_input * radial_strength
 
-                    velocity_x *= scale
-                    velocity_y *= scale
+                    velocity_y += radial_y * radial_input * radial_strength
 
-                # ------------------------------------------------
-                # Proposed movement
-                # ------------------------------------------------
+                    # ------------------------------------------------
+                    # Tangential input
+                    #
+                    # Lateral boost only amplifies actual sideways
+                    # mouse movement.
+                    # ------------------------------------------------
 
-                # Calculate the new position of the cursor based on the current velocity and time step.
-                new_x = actual_x + velocity_x * dt
+                    tangential_strength = config.normal_input_strength
 
-                new_y = actual_y + velocity_y * dt
+                    if boost_active:
+                        tangential_strength *= config.lateral_boost_multiplier
 
-                # ------------------------------------------------
-                # Logging
-                # ------------------------------------------------
+                    velocity_x += tangent_x * tangential_input * tangential_strength
 
-                if (
-                    logging_enabled
-                    and telemetry_interval is not None
-                    and current_time - last_telemetry_time >= telemetry_interval
-                ):
-                    last_telemetry_time = current_time
+                    velocity_y += tangent_y * tangential_input * tangential_strength
+
+                    # ------------------------------------------------
+                    # Drag
+                    # ------------------------------------------------
+
+                    velocity_x *= config.drag
+                    velocity_y *= config.drag
+
+                    # ------------------------------------------------
+                    # Maximum speed
+                    # ------------------------------------------------
 
                     speed = math.hypot(
                         velocity_x,
                         velocity_y,
                     )
 
-                    logger.debug(
-                        "physics | "
-                        "cursor=(%.1f, %.1f) | "
-                        "target=(%.1f, %.1f) | "
-                        "distance=%.2f | "
-                        "gravity=%.2f | "
-                        "velocity=(%.2f, %.2f) | "
-                        "speed=%.2f | "
-                        "user_input=(%.2f, %.2f) | "
-                        "radial_input=%.2f | "
-                        "tangential_input=%.2f | "
-                        "boost=%s",
-                        actual_x,
-                        actual_y,
-                        target_x,
-                        target_y,
-                        distance,
-                        gravity_strength,
-                        velocity_x,
-                        velocity_y,
-                        speed,
-                        user_dx,
-                        user_dy,
-                        radial_input,
-                        tangential_input,
-                        boost_active,
+                    if speed > config.max_speed:
+
+                        scale = config.max_speed / speed
+
+                        velocity_x *= scale
+                        velocity_y *= scale
+
+                    # ------------------------------------------------
+                    # Proposed movement
+                    # ------------------------------------------------
+
+                    # Calculate the new position of the cursor based on the current velocity and time step.
+                    new_x = actual_x + velocity_x * dt
+
+                    new_y = actual_y + velocity_y * dt
+
+                    # ------------------------------------------------
+                    # Logging
+                    # ------------------------------------------------
+
+                    if (
+                        logging_enabled
+                        and telemetry_interval is not None
+                        and current_time - last_telemetry_time >= telemetry_interval
+                    ):
+                        last_telemetry_time = current_time
+
+                        speed = math.hypot(
+                            velocity_x,
+                            velocity_y,
+                        )
+
+                        logger.debug(
+                            "physics | "
+                            "cursor=(%.1f, %.1f) | "
+                            "target=(%.1f, %.1f) | "
+                            "distance=%.2f | "
+                            "gravity=%.2f | "
+                            "velocity=(%.2f, %.2f) | "
+                            "speed=%.2f | "
+                            "user_input=(%.2f, %.2f) | "
+                            "radial_input=%.2f | "
+                            "tangential_input=%.2f | "
+                            "boost=%s",
+                            actual_x,
+                            actual_y,
+                            target_x,
+                            target_y,
+                            distance,
+                            gravity_strength,
+                            velocity_x,
+                            velocity_y,
+                            speed,
+                            user_dx,
+                            user_dy,
+                            radial_input,
+                            tangential_input,
+                            boost_active,
+                        )
+
+                    # ------------------------------------------------
+                    # Virtual desktop edge collisions
+                    # ------------------------------------------------
+
+                    if new_x <= SCREEN_LEFT:
+                        new_x = SCREEN_LEFT
+
+                        if velocity_x < 0:
+                            logger.info(
+                                "COLLISION | wall=LEFT | " "lost_velocity_x=%.2f",
+                                velocity_x,
+                            )
+
+                            velocity_x = 0.0
+
+                    elif new_x >= SCREEN_RIGHT:
+                        new_x = SCREEN_RIGHT
+
+                        if velocity_x > 0:
+                            logger.info(
+                                "COLLISION | wall=RIGHT | " "lost_velocity_x=%.2f",
+                                velocity_x,
+                            )
+
+                            velocity_x = 0.0
+
+                    if new_y <= SCREEN_TOP:
+                        new_y = SCREEN_TOP
+
+                        if velocity_y < 0:
+                            logger.info(
+                                "COLLISION | wall=TOP | " "lost_velocity_y=%.2f",
+                                velocity_y,
+                            )
+
+                            velocity_y = 0.0
+
+                    elif new_y >= SCREEN_BOTTOM:
+                        new_y = SCREEN_BOTTOM
+
+                        if velocity_y > 0:
+                            logger.info(
+                                "COLLISION | wall=BOTTOM | " "lost_velocity_y=%.2f",
+                                velocity_y,
+                            )
+
+                            velocity_y = 0.0
+
+                    controller.position = (
+                        round(new_x),
+                        round(new_y),
                     )
 
-                # ------------------------------------------------
-                # Virtual desktop edge collisions
-                # ------------------------------------------------
+                    expected_x, expected_y = controller.position
 
-                if new_x <= SCREEN_LEFT:
-                    new_x = SCREEN_LEFT
+                else:
 
-                    if velocity_x < 0:
-                        logger.info(
-                            "COLLISION | wall=LEFT | " "lost_velocity_x=%.2f",
-                            velocity_x,
-                        )
+                    velocity_x = 0.0
+                    velocity_y = 0.0
 
-                        velocity_x = 0.0
+                    controller.position = current_target
 
-                elif new_x >= SCREEN_RIGHT:
-                    new_x = SCREEN_RIGHT
-
-                    if velocity_x > 0:
-                        logger.info(
-                            "COLLISION | wall=RIGHT | " "lost_velocity_x=%.2f",
-                            velocity_x,
-                        )
-
-                        velocity_x = 0.0
-
-                if new_y <= SCREEN_TOP:
-                    new_y = SCREEN_TOP
-
-                    if velocity_y < 0:
-                        logger.info(
-                            "COLLISION | wall=TOP | " "lost_velocity_y=%.2f",
-                            velocity_y,
-                        )
-
-                        velocity_y = 0.0
-
-                elif new_y >= SCREEN_BOTTOM:
-                    new_y = SCREEN_BOTTOM
-
-                    if velocity_y > 0:
-                        logger.info(
-                            "COLLISION | wall=BOTTOM | " "lost_velocity_y=%.2f",
-                            velocity_y,
-                        )
-
-                        velocity_y = 0.0
-
-                controller.position = (
-                    round(new_x),
-                    round(new_y),
-                )
-
-                expected_x, expected_y = controller.position
+                    expected_x, expected_y = controller.position
 
             else:
-
-                velocity_x = 0.0
-                velocity_y = 0.0
-
-                controller.position = current_target
-
                 expected_x, expected_y = controller.position
 
-        else:
-            expected_x, expected_y = controller.position
+            # If the frame runs properly, reset the error counter and tracker
+            consecutive_errors = 0
+            last_frame_error = ""
 
-        time.sleep(1 / config.fps)
+        except Exception as e:
+            if not last_frame_error and not consecutive_errors:
+                print(f"An error has occured: {e}.")
+                print("Skipping frame.")
+                consecutive_errors += 1
+
+            elif (
+                telemetry_interval is not None
+                and current_time - last_telemetry_time >= telemetry_interval
+            ):
+                print(f"An error is still occuring: {e}.")
+                print("Skipping frame.")
+                consecutive_errors += 1
+
+            if consecutive_errors >= 5:
+                print(f"Too many consecutive errors: {consecutive_errors}")
+                print("Exiting...")
+                if logging_enabled:
+                    logger.info("Exit | Error Override.")
+
+                shutdown()
+
+            last_frame_error = str(e)
+
+            if (
+                logging_enabled
+                and telemetry_interval is not None
+                and current_time - last_telemetry_time >= telemetry_interval
+            ):
+                last_telemetry_time = current_time
+
+                speed = math.hypot(
+                    velocity_x,
+                    velocity_y,
+                )
+
+                logger.error("An ERROR occured: %s", e, exc_info=True)
+
+        finally:
+
+            time.sleep(1 / config.fps)
+
+
+
+def log_candidate_preset(
+    preset_name: str,
+    values: dict,
+):
+    """
+    Log a candidate preset to the log file.
+
+    Args:
+        preset_name (str): The name of the preset.
+        values (dict): A dictionary containing the preset values.
+    """
+    if not logging_enabled:
+        start_logging()
+
+    logger.info(
+        "USER_PRESET_BEGIN | name=%s",
+        preset_name,
+    )
+
+    for field_name, value in values.items():
+        logger.info(
+            "USER_PRESET_VALUE | " "name=%s | " "%s=%s",
+            preset_name,
+            field_name,
+            value,
+        )
+
+    logger.info(
+        "USER_PRESET_END | name=%s",
+        preset_name,
+    )
 
 
 # ------------------------------------------------------------
@@ -1066,136 +1172,154 @@ def main():
     """
     Start Mouse Gravity.
 
-    Initializes:
-    - Optional startup logging
-    - Mouse listener
-    - Physics thread
-    - Tkinter settings window
-    - System tray icon
-    - Tkinter main event loop
+    This function initializes the logging system, mouse listener, physics thread,
+    Tkinter root window, settings window, and tray icon. It then enters the Tkinter
+    event loop to keep the application running until shutdown is requested.
+
+    Raises:
+        Exception: If any error occurs during the initialization of the components.
     """
+
+    # Note to me: Consider refactoring this to improve readability
+
     global tray_icon
     global listener
     global tk_root
     global settings_ui
 
+    _section = ""
+
+    
     # --------------------------------------------------------
     # Logging
     # --------------------------------------------------------
-
-    if config.logging_enabled_by_default:
-        start_logging()
-
+    _section = "Logging Startup"
+    try:
+        if config.logging_enabled_by_default:
+            start_logging()
+    except Exception as e:
+        print(f"Error {e} happened during: {_section}")
     # --------------------------------------------------------
     # Mouse listener
     # --------------------------------------------------------
+    _section = "Mouse Listener Initialization"
+    try:
+        listener = mouse.Listener(
+            on_click=on_click,
+        )
 
-    listener = mouse.Listener(
-        on_click=on_click,
-    )
-
-    listener.start()
-
+        listener.start()
+    except Exception as e:
+        print(f"Error {e} happened during: {_section}")
     # --------------------------------------------------------
     # Physics thread
     # --------------------------------------------------------
+    _section = "Physics Thread Initialization"
+    try:
+        physics_thread = threading.Thread(
+            target=gravity_loop,
+            daemon=True,
+            name="MouseGravityPhysics",
+        )
 
-    physics_thread = threading.Thread(
-        target=gravity_loop,
-        daemon=True,
-        name="MouseGravityPhysics",
-    )
-
-    physics_thread.start()
+        physics_thread.start()
+    except Exception as e:
+        print(f"Error {e} happened during: {_section}")
 
     # --------------------------------------------------------
     # Tkinter root
     # --------------------------------------------------------
+    _section = "Pop-up Window Creation"
+    try:
+        tk_root = tk.Tk()
 
-    tk_root = tk.Tk()
+        # The root itself is never shown.
+        # The actual settings interface is a Toplevel window
+        # managed by SettingsWindow.
+        tk_root.withdraw()
 
-    # The root itself is never shown.
-    # The actual settings interface is a Toplevel window
-    # managed by SettingsWindow.
-    tk_root.withdraw()
-
-    # --------------------------------------------------------
-    # Settings window
-    # --------------------------------------------------------
-
-    settings_ui = SettingsWindow(
-        root=tk_root,
-        state_lock=state_lock,
-        logger=logger,
-    )
-
+        # --------------------------------------------------------
+        # Settings window
+        # --------------------------------------------------------
+        
+        settings_ui = SettingsWindow(
+            root=tk_root,
+            state_lock=state_lock,
+            logger=logger,
+            save_preset_callback=log_candidate_preset,
+        )
+    except Exception as e:
+        print(f"Error {e} happened during: {_section}")
     # --------------------------------------------------------
     # Tray icon
     # --------------------------------------------------------
+    _section = "Tray Icon Population"
+    try:
+        tray_icon = pystray.Icon(
+            "mouse_gravity",
+            create_vortex_icon(
+                boost_active=False,
+            ),
+            "Mouse Gravity: ACTIVE | Boost: OFF",
+            menu=pystray.Menu(
+                # ------------------------------------------------
+                # Status
+                # ------------------------------------------------
+                pystray.MenuItem(
+                    "Mouse Gravity: ACTIVE",
+                    lambda icon, item: None,
+                    enabled=False,
+                ),
+                pystray.Menu.SEPARATOR,
+                # ------------------------------------------------
+                # Lateral Boost
+                # ------------------------------------------------
+                pystray.MenuItem(
+                    "Lateral Boost",
+                    toggle_lateral_boost,
+                    checked=lambda item: lateral_boost,
+                ),
+                pystray.Menu.SEPARATOR,
+                # ------------------------------------------------
+                # Settings
+                # ------------------------------------------------
+                pystray.MenuItem(
+                    "Open Settings",
+                    show_settings_window,
+                ),
+                pystray.Menu.SEPARATOR,
+                # ------------------------------------------------
+                # Logging
+                # ------------------------------------------------
+                pystray.MenuItem(
+                    "Enable Logging",
+                    toggle_logging,
+                    checked=lambda item: logging_enabled,
+                ),
+                pystray.MenuItem(
+                    "Open Log Folder",
+                    open_log_folder,
+                ),
+                pystray.Menu.SEPARATOR,
+                # ------------------------------------------------
+                # Exit
+                # ------------------------------------------------
+                pystray.MenuItem(
+                    "Exit",
+                    tray_exit,
+                ),
+            ),
+        )
 
-    tray_icon = pystray.Icon(
-        "mouse_gravity",
-        create_vortex_icon(
-            boost_active=False,
-        ),
-        "Mouse Gravity: ACTIVE | Boost: OFF",
-        menu=pystray.Menu(
-            # ------------------------------------------------
-            # Status
-            # ------------------------------------------------
-            pystray.MenuItem(
-                "Mouse Gravity: ACTIVE",
-                lambda icon, item: None,
-                enabled=False,
-            ),
-            pystray.Menu.SEPARATOR,
-            # ------------------------------------------------
-            # Lateral Boost
-            # ------------------------------------------------
-            pystray.MenuItem(
-                "Lateral Boost",
-                toggle_lateral_boost,
-                checked=lambda item: lateral_boost,
-            ),
-            pystray.Menu.SEPARATOR,
-            # ------------------------------------------------
-            # Settings
-            # ------------------------------------------------
-            pystray.MenuItem(
-                "Open Settings",
-                show_settings_window,
-            ),
-            pystray.Menu.SEPARATOR,
-            # ------------------------------------------------
-            # Logging
-            # ------------------------------------------------
-            pystray.MenuItem(
-                "Enable Logging",
-                toggle_logging,
-                checked=lambda item: logging_enabled,
-            ),
-            pystray.MenuItem(
-                "Open Log Folder",
-                open_log_folder,
-            ),
-            pystray.Menu.SEPARATOR,
-            # ------------------------------------------------
-            # Exit
-            # ------------------------------------------------
-            pystray.MenuItem(
-                "Exit",
-                tray_exit,
-            ),
-        ),
-    )
+        # --------------------------------------------------------
+        # Start tray icon
+        #
+        # run_detached() allows tkinter to own the main thread.
+        # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # Start tray icon
-    #
-    # run_detached() allows tkinter to own the main thread.
-    # --------------------------------------------------------
-
-    tray_icon.run_detached()
+        tray_icon.run_detached()
+    except Exception as e:
+        print(f"Error {e} happened during: {_section}")
 
     # --------------------------------------------------------
     # Tkinter event loop
@@ -1205,7 +1329,6 @@ def main():
         tk_root.mainloop()
 
     finally:
-
         # ----------------------------------------------------
         # Final cleanup
         # ----------------------------------------------------

@@ -3,7 +3,6 @@ from dataclasses import dataclass
 
 from config import config
 
-
 @dataclass
 class GravityPoint:
     """
@@ -26,7 +25,7 @@ class GravityPoint:
     velocity_y: float = 0.0
 
 
-def _gravity_strength(distance: float) -> float:
+def _gravity_strength(distance: float, last_placed_boost:bool=False) -> float:
     """
     Return the configured point-to-point gravity magnitude.
 
@@ -45,11 +44,21 @@ def _gravity_strength(distance: float) -> float:
         config.min_gravity_distance,
     )
 
-    gravity_strength = (
-        config.point_gravity
+    if last_placed_boost:
+        gravity_strength = (
+        (config.point_gravity * config.last_placed_boost)
         * (config.reference_distance / gravity_distance)
         ** config.gravity_distance_power
     )
+    else:
+        gravity_strength = (
+            config.point_gravity
+            * (config.reference_distance / gravity_distance)
+            ** config.gravity_distance_power
+        )
+
+    # print(f"Last Placed (Gravity Strength): {last_placed_boost}")
+    # print(f"Gravity Strength: {gravity_strength}")
 
     return min(
         gravity_strength,
@@ -62,6 +71,7 @@ def point_gravity_vector(
     source_y: float,
     target_x: float,
     target_y: float,
+    last_placed:bool,
 ) -> tuple[float, float, bool]:
     """
     Calculate acceleration from one gravity point toward another.
@@ -90,7 +100,9 @@ def point_gravity_vector(
     if distance <= config.body_stop_radius:
         return 0.0, 0.0, True
 
-    gravity_strength = _gravity_strength(distance)
+    # print(f"Last Placed: {last_placed}")
+
+    gravity_strength = _gravity_strength(distance, last_placed)
     inverse_distance = 1.0 / distance
 
     return (
@@ -104,6 +116,7 @@ def update_gravity_points(
     points: list[GravityPoint],
     dt: float,
     bounds: tuple[float, float, float, float],
+    place_bias: bool = False
 ) -> GravityPoint | None:
     """
     Advance all gravity points under mutual attraction.
@@ -124,6 +137,8 @@ def update_gravity_points(
     Returns:
         The removed gravity point if two points merged, otherwise None.
     """
+
+    global last_placed
     point_count = len(points)
 
     if point_count < 2:
@@ -137,15 +152,36 @@ def update_gravity_points(
     for i in range(point_count - 1):
         point = points[i]
 
+        
+
         for j in range(i + 1, point_count):
             other = points[j]
+            # print(f"Point being evaluated:{point}")
+            # print(f"Point being evaluated (verify with position in list):{points[i]}")
+
+            # print(f"Last point in group: {points[-1]}")
+
+            if points[j] == points[-1] and place_bias:
+                last_placed = True
+                # print("Last Placed SHOULD BE TRUE HERE WTF")
+            else:
+                last_placed = False
+                # print("Last Placed SHOULD BE FALSE HERE")
+
+
+            # print(f"Index: {i}, {j}")
+            # print(f"Last Placed (pre PG-Vector): {last_placed}")
 
             pair_ax, pair_ay, should_merge = point_gravity_vector(
                 point.x,
                 point.y,
                 other.x,
                 other.y,
+                last_placed
             )
+
+            # print(f"Last Placed (after PG-Vector): {last_placed}")
+
 
             if should_merge:
                 # i is always older than j because points are stored in
@@ -161,12 +197,28 @@ def update_gravity_points(
 
     screen_left, screen_top, screen_right, screen_bottom = bounds
 
-    # Scale drag by elapsed time so damping remains approximately stable
-    # if the physics update rate changes.
-    drag_factor = config.point_drag ** (dt * config.point_physics_hz)
+    
     max_speed_squared = config.point_max_speed * config.point_max_speed
 
     for index, point in enumerate(points):
+
+        # FIND A BETTER WAY TO DO THIS
+        if point == points[-1] and place_bias:
+            last_placed = True
+        else:
+            last_placed = False
+
+        # Scale drag by elapsed time so damping remains approximately stable
+        # if the physics update rate changes.
+        if last_placed:
+            drag_factor = (config.point_drag / config.last_placed_drag) ** (dt * config.point_physics_hz)
+            
+        else:
+            drag_factor = config.point_drag ** (dt * config.point_physics_hz)
+
+        # print(f"Index (Drag Calculation): {index}")
+        # print(f"Last Placed (Drag Calculation): {last_placed}")
+
         point.velocity_x += acceleration_x[index] * dt
         point.velocity_y += acceleration_y[index] * dt
 

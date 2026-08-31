@@ -33,6 +33,7 @@ from pathlib import Path
 
 import logging
 import math
+import random
 import os
 import threading
 import time
@@ -54,6 +55,10 @@ from settings_window import SettingsWindow
 # Gravity points are stored oldest-to-newest. New points are always appended,
 # allowing collision logic to consistently remove the oldest merged point.
 gravity_points: list[GravityPoint] = []
+
+# TODO
+# Add place_bias support so the preset shapes do not have any bias until the user adds a point
+place_bias = True
 
 click_count = 0
 last_click_time = 0.0
@@ -1054,6 +1059,62 @@ def spawn_pentagram_preset() -> None:
         f"Spawned pentagram preset at radius {radius}."
     )
 
+def spawn_random_point_preset() -> None:
+    """
+    Replace active points with randomly placed points around the cursor.
+
+    ``random_spawn_radius`` is measured from the cursor to each vertex.
+    The cursor position is read only when this function executes, allowing
+    delayed preset placement.
+    """
+
+    def alpha():
+        "Returns a random angle"
+        alpha = 2 * math.pi * random.random()
+        return alpha
+
+
+    cursor_x, cursor_y = controller.position
+
+    radius = (
+        config.random_spawn_radius
+    )
+
+    points = []
+
+    for index in range(config.random_spawn_number):
+        # define a circle around the cursor
+
+        points.append(
+            GravityPoint(
+                x=(
+                    radius * math.cos(alpha()) + cursor_x
+                ),
+                y=(
+                    radius * math.cos(alpha()) + cursor_y
+                ),
+            )
+        )
+
+    with state_lock:
+        gravity_points.clear()
+        gravity_points.extend(
+            points
+        )
+
+    physics_wake_event.set()
+
+    if logging_enabled:
+        logger.info(
+            "N_BODY_PRESET | preset=random | radius=%s",
+            radius,
+        )
+
+    print(
+        f"Spawned random points preset at radius {radius}."
+    )
+
+
 
 # ------------------------------------------------------------
 # Click handling
@@ -1240,6 +1301,13 @@ def gravity_loop() -> None:
         time.perf_counter()
     )
 
+    telemetry_interval = (
+        1.0 / config.log_telemetry_hz if config.log_telemetry_hz > 0 else None
+    )
+
+    last_telemetry_time = time.perf_counter()
+
+
     consecutive_errors = 0
 
     while running.is_set():
@@ -1296,6 +1364,18 @@ def gravity_loop() -> None:
                             "GRAVITY_POINT | merged_oldest_removed=%s",
                             removed_point,
                         )
+
+                if (
+                    logging_enabled
+                    and telemetry_interval is not None
+                    and (current_time - last_telemetry_time >= telemetry_interval)
+                ):
+
+                    last_telemetry_time = current_time
+
+                    pass
+
+
 
             consecutive_errors = 0
             last_frame_error = ""
@@ -1439,6 +1519,8 @@ def main() -> None:
             get_point_status_callback=get_point_status,
             spawn_triangle_callback=spawn_triangle_preset,
             spawn_pentagram_callback=spawn_pentagram_preset,
+            spawn_random_callback=spawn_random_point_preset,
+
         )
 
         tk_root.after(

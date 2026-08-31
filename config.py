@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 # Hard safety/performance limit for the N-body simulation.
 # Five points produce at most 10 unique point-to-point calculations.
-MAX_GRAVITY_POINTS = 5
+MAX_GRAVITY_POINTS = 7
 
 
 @dataclass
@@ -21,7 +21,12 @@ class GravityConfig:
     # --------------------------------------------------------
 
     # Base gravity acceleration at reference_distance.
-    point_gravity: float = 4.0
+    point_gravity: float = 8.0
+
+    # Optional: Boost for last placed point.
+    last_placed_boost: float = 3.0
+    # Also increase drag to simulate more inertia
+    last_placed_drag: float = 6.0
 
     # Distance used as the baseline for the gravity falloff equation.
     reference_distance: float = 300.0
@@ -37,20 +42,20 @@ class GravityConfig:
     max_gravity_acceleration: float = 6000.0
 
     # Distance at which two gravity points are considered merged.
-    body_stop_radius: float = 5.0
+    body_stop_radius: float = 1.0
 
     # --------------------------------------------------------
     # Point motion
     # --------------------------------------------------------
 
     # Number of gravity points the user may place.
-    multi_point_count: int = 5
+    multi_point_count: int = 7
 
     # Velocity damping. Values closer to 1 preserve momentum longer.
     point_drag: float = 0.99
 
     # Maximum gravity-point speed in pixels per second.
-    point_max_speed: float = 100.0
+    point_max_speed: float = 1000.0
 
     # Physics update rate for gravity-point movement.
     point_physics_hz: float = 30.0
@@ -62,6 +67,9 @@ class GravityConfig:
     # Distance from the cursor to each spawned point.
     triangle_spawn_radius: float = 300.0
     pentagram_spawn_radius: float = 300.0
+
+    random_spawn_radius: float = 300.0
+    random_spawn_number: int = 4
 
     # Delay after pressing an N-body preset button. This gives the user
     # time to move the cursor to the desired center before spawning.
@@ -79,6 +87,7 @@ class GravityConfig:
     # --------------------------------------------------------
 
     logging_enabled_by_default: bool = True
+    log_telemetry_hz: int = 5
 
 
 config = GravityConfig()
@@ -92,6 +101,8 @@ PRESETS = {
         "point_gravity": 3.0,
         "reference_distance": 300.0,
         "gravity_distance_power": 1.0,
+        "last_placed_boost": 3.0,
+        "last_placed_drag": 6.0,
         "min_gravity_distance": 40.0,
         "max_gravity_acceleration": 5000.0,
         "body_stop_radius": 2.0,
@@ -103,6 +114,8 @@ PRESETS = {
         "point_gravity": 4.0,
         "reference_distance": 350.0,
         "gravity_distance_power": 0.9,
+        "last_placed_boost": 3.0,
+        "last_placed_drag": 6.0,
         "min_gravity_distance": 50.0,
         "max_gravity_acceleration": 4500.0,
         "body_stop_radius": 1.0,
@@ -114,6 +127,8 @@ PRESETS = {
         "point_gravity": 10.0,
         "reference_distance": 250.0,
         "gravity_distance_power": 2.0,
+        "last_placed_boost": 3.0,
+        "last_placed_drag": 6.0,
         "min_gravity_distance": 50.0,
         "max_gravity_acceleration": 6500.0,
         "body_stop_radius": 2.0,
@@ -125,6 +140,8 @@ PRESETS = {
         "point_gravity": 2.0,
         "reference_distance": 400.0,
         "gravity_distance_power": 1.2,
+        "last_placed_boost": 3.0,
+        "last_placed_drag": 6.0,
         "min_gravity_distance": 30.0,
         "max_gravity_acceleration": 4000.0,
         "body_stop_radius": 3.0,
@@ -136,6 +153,8 @@ PRESETS = {
         "point_gravity": 6.0,
         "reference_distance": 300.0,
         "gravity_distance_power": 2.0,
+        "last_placed_boost": 3.0,
+        "last_placed_drag": 6.0,
         "min_gravity_distance": 40.0,
         "max_gravity_acceleration": 6000.0,
         "body_stop_radius": 1.0,
@@ -147,6 +166,8 @@ PRESETS = {
         "point_gravity": 8.0,
         "reference_distance": 500.0,
         "gravity_distance_power": 1.25,
+        "last_placed_boost": 3.0,
+        "last_placed_drag": 6.0,
         "min_gravity_distance": 100.0,
         "max_gravity_acceleration": 4000.0,
         "body_stop_radius": 5.0,
@@ -154,4 +175,17 @@ PRESETS = {
         "point_max_speed": 100.0,
         "point_physics_hz": 30.0,
     },
+    "Sicko Mode": {
+        "point_gravity": 250.0,
+        "reference_distance": 500.0,
+        "gravity_distance_power": 10,
+        "last_placed_boost": 4.0,
+        "last_placed_drag": 2.5,
+        "min_gravity_distance": 10.0,
+        "max_gravity_acceleration": 3000.0,
+        "body_stop_radius": 1.0,
+        "point_drag": 0.9999,
+        "point_max_speed": 5000.0,
+        "point_physics_hz": 60,
+        }
 }

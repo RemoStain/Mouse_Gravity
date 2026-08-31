@@ -34,15 +34,19 @@ N_BODY_FIELDS = [
     "point_gravity",
     "reference_distance",
     "gravity_distance_power",
+    "last_placed_boost",
+    "last_placed_drag",
     "min_gravity_distance",
     "max_gravity_acceleration",
     "body_stop_radius",
-    "multi_point_count",
+    # "multi_point_count",
     "point_drag",
     "point_max_speed",
-    "point_physics_hz",
+    #"point_physics_hz",
     "triangle_spawn_radius",
     "pentagram_spawn_radius",
+    "random_spawn_radius",
+    "random_spawn_number",
     "n_body_spawn_delay",
 ]
 
@@ -106,6 +110,8 @@ class SettingsWindow:
         get_point_status_callback,
         spawn_triangle_callback,
         spawn_pentagram_callback,
+        spawn_random_callback,
+
     ):
         self.root = root
         self.state_lock = state_lock
@@ -116,6 +122,8 @@ class SettingsWindow:
         self.get_point_status_callback = get_point_status_callback
         self.spawn_triangle_callback = spawn_triangle_callback
         self.spawn_pentagram_callback = spawn_pentagram_callback
+        self.spawn_random_callback = spawn_random_callback
+
 
         self.variables = {}
         self.preset_buttons = {}
@@ -567,6 +575,18 @@ class SettingsWindow:
 
         ttk.Button(
             button_frame,
+            text="Random Spawn",
+            command=lambda: self.schedule_n_body_spawn(
+                "Random",
+                self.spawn_random_callback,
+            ),
+        ).pack(
+            side="left",
+            padx=5,
+        )
+
+        ttk.Button(
+            button_frame,
             text="Abort",
             command=lambda: self.cancel_n_body_spawn(True),
         ).pack(
@@ -922,9 +942,13 @@ class SettingsWindow:
             return expected_type(text)
 
         except ValueError as exc:
+            # print(type(current_value))
+            # print(current_value)
+            # print(exc)
             raise ValueError(
                 f"{field_name} must be a valid {expected_type.__name__}"
             ) from exc
+
 
     # --------------------------------------------------------
     # Presets

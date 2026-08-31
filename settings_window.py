@@ -1,28 +1,28 @@
 """
-Settings window for the Mouse Gravity application.
+Settings window for the gravity-point N-body application.
 
-This module contains the Tkinter interface used to:
+This module provides the Tkinter interface used to:
 
-- Edit runtime configuration values.
-- Load and review gravity presets.
+- Edit gravity-point runtime configuration.
+- Load predefined N-body physics presets.
 - Reset settings to defaults.
-- Save candidate presets to the log.
-- Switch between single-point and multi-point gravity modes.
-- Clear placed gravity points.
-- Schedule N-body gravity presets after a configurable delay.
+- Save candidate presets to the application log.
+- Clear currently placed gravity points.
+- Schedule triangle and pentagram point-placement presets.
 
-The settings window communicates with gravity_mouse.py through callbacks.
-This avoids importing gravity_mouse.py here and prevents circular imports.
+The settings window communicates with gravity_mouse.py exclusively through
+callbacks. This keeps UI code separate from runtime simulation code and
+avoids circular imports.
 """
 
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 from config import (
-    config,
+    GravityConfig,
     MAX_GRAVITY_POINTS,
     PRESETS,
-    MouseGravityConfig,
+    config,
 )
 
 
@@ -30,32 +30,17 @@ from config import (
 # Settings fields
 # ------------------------------------------------------------
 
-# Settings displayed in classic single-target mode.
-CLASSIC_FIELDS = [
-    "gravity",
-    # "reference_distance",
+N_BODY_FIELDS = [
+    "point_gravity",
+    "reference_distance",
     "gravity_distance_power",
     "min_gravity_distance",
     "max_gravity_acceleration",
-    "max_speed",
-    "drag",
-    "stop_radius",
-    "fps",
-    # "normal_input_strength",
-    # "toward_input_multiplier",
-    # "away_input_multiplier",
-    # "click_sequence_timeout",
-    # "log_telemetry_hz",
-]
-
-
-# Settings displayed in multi-point / N-body mode.
-MULTI_FIELDS = [
-    *CLASSIC_FIELDS,
+    "body_stop_radius",
     "multi_point_count",
-    "point_gravity_multiplier",
     "point_drag",
     "point_max_speed",
+    "point_physics_hz",
     "triangle_spawn_radius",
     "pentagram_spawn_radius",
     "n_body_spawn_delay",
@@ -77,47 +62,38 @@ BUTTON_ACTIVE_BG = "#e2e2e2"
 
 class SettingsWindow:
     """
-    Tkinter settings window for Mouse Gravity.
+    Tkinter settings window for the N-body gravity-point simulation.
 
-    The window has two gravity layouts:
-
-    1. Single-point gravity.
-    2. Multi-point / N-body gravity.
-
-    Runtime simulation operations are handled through callbacks supplied
-    by gravity_mouse.py. This keeps the UI separate from the physics
-    implementation and avoids circular imports.
+    The application has only one simulation mode. Mouse input is used for
+    placing gravity points and selecting preset centers, but the simulation
+    never programmatically moves the cursor.
 
     Args:
         root:
             Hidden Tkinter root window.
 
         state_lock:
-            Lock used to safely update shared runtime configuration.
+            Lock protecting shared runtime configuration and gravity state.
 
         logger:
             Application logger.
 
         save_preset_callback:
-            Callback used to save a user-created preset to the log.
-
-        set_gravity_mode_callback:
-            Callback used to switch between "single" and "multi" modes.
+            Callback used to write a candidate user preset to the log.
 
         clear_gravity_points_callback:
-            Callback used to remove all placed multi-point gravity sources.
+            Callback used to remove all active gravity points.
 
         get_point_status_callback:
-            Callback returning:
-                (points_placed, configured_point_limit)
+            Callback returning ``(points_placed, configured_point_limit)``.
 
         spawn_triangle_callback:
-            Callback that immediately spawns an equilateral triangle of
-            gravity points around the cursor's current position.
+            Callback that spawns three points in an equilateral triangle
+            around the cursor's current position.
 
         spawn_pentagram_callback:
-            Callback that immediately spawns five gravity points around
-            the cursor's current position.
+            Callback that spawns five points around the cursor's current
+            position.
     """
 
     def __init__(
@@ -126,7 +102,6 @@ class SettingsWindow:
         state_lock,
         logger,
         save_preset_callback,
-        set_gravity_mode_callback,
         clear_gravity_points_callback,
         get_point_status_callback,
         spawn_triangle_callback,
@@ -136,81 +111,35 @@ class SettingsWindow:
         self.state_lock = state_lock
         self.logger = logger
 
-        # ----------------------------------------------------
-        # Runtime callbacks
-        # ----------------------------------------------------
-
         self.save_preset_callback = save_preset_callback
-
-        self.set_gravity_mode_callback = (
-            set_gravity_mode_callback
-        )
-
-        self.clear_gravity_points_callback = (
-            clear_gravity_points_callback
-        )
-
-        self.get_point_status_callback = (
-            get_point_status_callback
-        )
-
-        self.spawn_triangle_callback = (
-            spawn_triangle_callback
-        )
-
-        self.spawn_pentagram_callback = (
-            spawn_pentagram_callback
-        )
-
-        # ----------------------------------------------------
-        # UI state
-        # ----------------------------------------------------
+        self.clear_gravity_points_callback = clear_gravity_points_callback
+        self.get_point_status_callback = get_point_status_callback
+        self.spawn_triangle_callback = spawn_triangle_callback
+        self.spawn_pentagram_callback = spawn_pentagram_callback
 
         self.variables = {}
         self.preset_buttons = {}
-
         self.selected_preset = None
-
         self.apply_button = None
-
         self.dirty = False
 
-        self.gravity_mode = "single"
-
-        # Tkinter after() identifier for a pending N-body spawn.
-        #
-        # Only one N-body spawn timer is allowed at a time. If another
-        # preset button is pressed, the existing timer is cancelled.
+        # Tkinter after() identifier for a pending N-body preset spawn.
+        # Only one delayed spawn may be active at a time.
         self.n_body_spawn_after_id = None
 
-        # ----------------------------------------------------
-        # Window
-        # ----------------------------------------------------
+        self.window = tk.Toplevel(root)
+        self.window.title("N-Body Gravity Settings")
 
-        self.window = tk.Toplevel(
-            root
+        self.loaded_preset_var = tk.StringVar(
+            value="Preset: None"
         )
 
-        self.window.title(
-            "Mouse Gravity Settings"
+        self.point_status_var = tk.StringVar(
+            value="Points placed: 0"
         )
 
-        self.loaded_preset_var = (
-            tk.StringVar(
-                value="Preset: None"
-            )
-        )
-
-        self.point_status_var = (
-            tk.StringVar(
-                value="Points placed: 0"
-            )
-        )
-
-        self.n_body_status_var = (
-            tk.StringVar(
-                value=""
-            )
+        self.n_body_status_var = tk.StringVar(
+            value=""
         )
 
         self.window.protocol(
@@ -219,7 +148,6 @@ class SettingsWindow:
         )
 
         self._build()
-
         self._refresh_point_status()
 
     # --------------------------------------------------------
@@ -228,14 +156,8 @@ class SettingsWindow:
 
     def _build(self):
         """
-        Build the complete settings window.
-
-        The mode-specific settings section is rebuilt whenever the user
-        switches between single-point and multi-point gravity.
-
-        Presets and the Apply / Close controls remain visible in both modes.
+        Build the complete N-body settings window.
         """
-
         self.main_frame = ttk.Frame(
             self.window,
             padding=15,
@@ -246,13 +168,9 @@ class SettingsWindow:
             expand=True,
         )
 
-        # ----------------------------------------------------
-        # Title
-        # ----------------------------------------------------
-
         ttk.Label(
             self.main_frame,
-            text="Mouse Gravity Settings",
+            text="N-Body Gravity Settings",
             font=(
                 "TkDefaultFont",
                 12,
@@ -262,23 +180,6 @@ class SettingsWindow:
             pady=(0, 10),
         )
 
-        # ----------------------------------------------------
-        # Gravity mode switch
-        # ----------------------------------------------------
-
-        self.mode_button = ttk.Button(
-            self.main_frame,
-            text="Switch to Multi-Point Gravity",
-            command=self.toggle_gravity_layout,
-        )
-
-        self.mode_button.pack(
-            fill="x",
-            pady=(0, 10),
-        )
-
-        # This frame contains the settings layout for the currently
-        # selected gravity mode.
         self.layout_frame = ttk.Frame(
             self.main_frame,
         )
@@ -288,13 +189,7 @@ class SettingsWindow:
             expand=True,
         )
 
-        self._build_settings_layout(
-            CLASSIC_FIELDS
-        )
-
-        # ----------------------------------------------------
-        # Bottom controls
-        # ----------------------------------------------------
+        self._build_settings_layout()
 
         bottom_frame = ttk.Frame(
             self.window,
@@ -316,7 +211,7 @@ class SettingsWindow:
 
         preset_frame = ttk.LabelFrame(
             bottom_frame,
-            text="Presets",
+            text="Physics Presets",
             padding=8,
         )
 
@@ -325,8 +220,6 @@ class SettingsWindow:
             pady=(8, 4),
         )
 
-        # Preset buttons can exceed the width of the settings window.
-        # A horizontal canvas keeps them on a single row.
         preset_canvas = tk.Canvas(
             preset_frame,
             height=42,
@@ -352,18 +245,12 @@ class SettingsWindow:
         preset_buttons_frame.bind(
             "<Configure>",
             lambda event: preset_canvas.configure(
-                scrollregion=(
-                    preset_canvas.bbox(
-                        "all"
-                    )
-                )
+                scrollregion=preset_canvas.bbox("all")
             ),
         )
 
         preset_canvas.configure(
-            xscrollcommand=(
-                preset_scrollbar.set
-            ),
+            xscrollcommand=preset_scrollbar.set,
         )
 
         preset_canvas.pack(
@@ -383,9 +270,7 @@ class SettingsWindow:
                 bg=PRESET_NORMAL_BG,
                 activebackground=BUTTON_ACTIVE_BG,
                 relief="raised",
-                command=lambda name=preset_name: (
-                    self.load_preset(name)
-                ),
+                command=lambda name=preset_name: self.load_preset(name),
             )
 
             button.pack(
@@ -394,13 +279,7 @@ class SettingsWindow:
                 pady=2,
             )
 
-            self.preset_buttons[
-                preset_name
-            ] = button
-
-        # ----------------------------------------------------
-        # Preset utility controls
-        # ----------------------------------------------------
+            self.preset_buttons[preset_name] = button
 
         preset_utility_frame = ttk.Frame(
             preset_frame,
@@ -435,16 +314,10 @@ class SettingsWindow:
 
         ttk.Label(
             bottom_frame,
-            textvariable=(
-                self.loaded_preset_var
-            ),
+            textvariable=self.loaded_preset_var,
         ).pack(
             pady=(2, 8),
         )
-
-        # ----------------------------------------------------
-        # Apply / Close
-        # ----------------------------------------------------
 
         action_frame = ttk.Frame(
             bottom_frame,
@@ -474,27 +347,12 @@ class SettingsWindow:
             side="right",
         )
 
-    def _build_settings_layout(
-        self,
-        fields,
-    ):
+    def _build_settings_layout(self):
         """
-        Rebuild the scrollable settings section.
-
-        Args:
-            fields:
-                Iterable of config attribute names to display.
+        Build the scrollable point controls and configuration fields.
         """
-
-        # Remove the previous mode-specific layout.
-        for widget in (
-            self.layout_frame.winfo_children()
-        ):
+        for widget in self.layout_frame.winfo_children():
             widget.destroy()
-
-        # ----------------------------------------------------
-        # Scrollable settings area
-        # ----------------------------------------------------
 
         canvas = tk.Canvas(
             self.layout_frame,
@@ -507,44 +365,31 @@ class SettingsWindow:
             command=canvas.yview,
         )
 
-        self.settings_frame = ttk.Frame(
-            canvas,
-        )
+        self.settings_frame = ttk.Frame(canvas)
 
         self.settings_frame.bind(
             "<Configure>",
             lambda event: canvas.configure(
-                scrollregion=(
-                    canvas.bbox(
-                        "all"
-                    )
-                )
+                scrollregion=canvas.bbox("all")
             ),
         )
 
-        canvas_window = (
-            canvas.create_window(
-                (0, 0),
-                window=self.settings_frame,
-                anchor="nw",
-            )
+        canvas_window = canvas.create_window(
+            (0, 0),
+            window=self.settings_frame,
+            anchor="nw",
         )
 
-        # Keep the settings frame the same width as the visible canvas.
         canvas.bind(
             "<Configure>",
-            lambda event: (
-                canvas.itemconfigure(
-                    canvas_window,
-                    width=event.width,
-                )
+            lambda event: canvas.itemconfigure(
+                canvas_window,
+                width=event.width,
             ),
         )
 
         canvas.configure(
-            yscrollcommand=(
-                scrollbar.set
-            ),
+            yscrollcommand=scrollbar.set,
         )
 
         canvas.pack(
@@ -558,54 +403,28 @@ class SettingsWindow:
             fill="y",
         )
 
-        row = 0
+        row = self._build_point_controls(0)
 
-        # ----------------------------------------------------
-        # Multi-point controls
-        # ----------------------------------------------------
-
-        if self.gravity_mode == "multi":
-            row = (
-                self._build_multi_point_controls(
-                    row
-                )
-            )
-
-        # ----------------------------------------------------
-        # Config fields
-        # ----------------------------------------------------
-
-        for field_name in fields:
+        for field_name in N_BODY_FIELDS:
             self._create_setting_row(
                 field_name,
                 row,
             )
-
             row += 1
 
-    def _build_multi_point_controls(
-        self,
-        row,
-    ):
+    def _build_point_controls(self, row):
         """
-        Build controls specific to multi-point and N-body gravity.
+        Build point-management and delayed placement-preset controls.
 
         Args:
-            row:
-                Starting grid row.
+            row: Starting grid row.
 
         Returns:
-            int:
-                The next unused grid row.
+            The next unused grid row.
         """
-
-        # ----------------------------------------------------
-        # Multi-point heading
-        # ----------------------------------------------------
-
         ttk.Label(
             self.settings_frame,
-            text="Multi-Point Gravity",
+            text="Gravity Points",
             font=(
                 "TkDefaultFont",
                 11,
@@ -625,9 +444,9 @@ class SettingsWindow:
         ttk.Label(
             self.settings_frame,
             text=(
-                "Double-click to place up to "
-                f"{MAX_GRAVITY_POINTS} points. "
-                "Points weakly attract each other."
+                "Double-click to place gravity points. "
+                f"A maximum of {MAX_GRAVITY_POINTS} points is supported. "
+                "Triple-click clears all points; quadruple-click exits."
             ),
             wraplength=420,
             justify="left",
@@ -642,15 +461,9 @@ class SettingsWindow:
 
         row += 1
 
-        # ----------------------------------------------------
-        # Point status
-        # ----------------------------------------------------
-
         ttk.Label(
             self.settings_frame,
-            textvariable=(
-                self.point_status_var
-            ),
+            textvariable=self.point_status_var,
         ).grid(
             row=row,
             column=0,
@@ -665,9 +478,7 @@ class SettingsWindow:
         ttk.Button(
             self.settings_frame,
             text="Clear Gravity Points",
-            command=(
-                self.clear_gravity_points_callback
-            ),
+            command=self.clear_gravity_points_callback,
         ).grid(
             row=row,
             column=0,
@@ -679,13 +490,9 @@ class SettingsWindow:
 
         row += 1
 
-        # ----------------------------------------------------
-        # N-body presets
-        # ----------------------------------------------------
-
         ttk.Label(
             self.settings_frame,
-            text="N-Body Presets",
+            text="Placement Presets",
             font=(
                 "TkDefaultFont",
                 10,
@@ -705,9 +512,8 @@ class SettingsWindow:
         ttk.Label(
             self.settings_frame,
             text=(
-                "Press a preset, then move the cursor "
-                "to the desired center position before "
-                "the spawn timer expires."
+                "Press a preset, then move the cursor to the desired "
+                "center position before the spawn timer expires."
             ),
             wraplength=420,
             justify="left",
@@ -722,17 +528,11 @@ class SettingsWindow:
 
         row += 1
 
-        # ----------------------------------------------------
-        # N-body preset buttons
-        # ----------------------------------------------------
-
-        n_body_button_frame = (
-            ttk.Frame(
-                self.settings_frame
-            )
+        button_frame = ttk.Frame(
+            self.settings_frame
         )
 
-        n_body_button_frame.grid(
+        button_frame.grid(
             row=row,
             column=0,
             columnspan=2,
@@ -742,13 +542,11 @@ class SettingsWindow:
         )
 
         ttk.Button(
-            n_body_button_frame,
+            button_frame,
             text="Equilateral Triangle",
-            command=lambda: (
-                self.schedule_n_body_spawn(
-                    "Equilateral Triangle",
-                    self.spawn_triangle_callback,
-                )
+            command=lambda: self.schedule_n_body_spawn(
+                "Equilateral Triangle",
+                self.spawn_triangle_callback,
             ),
         ).pack(
             side="left",
@@ -756,14 +554,21 @@ class SettingsWindow:
         )
 
         ttk.Button(
-            n_body_button_frame,
+            button_frame,
             text="Pentagram",
-            command=lambda: (
-                self.schedule_n_body_spawn(
-                    "Pentagram",
-                    self.spawn_pentagram_callback,
-                )
+            command=lambda: self.schedule_n_body_spawn(
+                "Pentagram",
+                self.spawn_pentagram_callback,
             ),
+        ).pack(
+            side="left",
+            padx=5,
+        )
+
+        ttk.Button(
+            button_frame,
+            text="Abort",
+            command=lambda: self.cancel_n_body_spawn(True),
         ).pack(
             side="left",
             padx=5,
@@ -771,12 +576,9 @@ class SettingsWindow:
 
         row += 1
 
-        # Displays countdown/spawn status.
         ttk.Label(
             self.settings_frame,
-            textvariable=(
-                self.n_body_status_var
-            ),
+            textvariable=self.n_body_status_var,
         ).grid(
             row=row,
             column=0,
@@ -784,21 +586,6 @@ class SettingsWindow:
             sticky="w",
             padx=5,
             pady=(0, 10),
-        )
-
-        # row += 1
-
-        ttk.Button(
-            n_body_button_frame,
-            text="Abort",
-            command=lambda: (
-                self.cancel_n_body_spawn(
-                    True
-                )
-            ),
-        ).pack(
-            side="right",
-            padx=5,
         )
 
         row += 1
@@ -818,179 +605,78 @@ class SettingsWindow:
         return row + 1
 
     # --------------------------------------------------------
-    # Gravity mode
-    # --------------------------------------------------------
-
-    def toggle_gravity_layout(self):
-        """
-        Switch between single-point and multi-point gravity.
-
-        Existing gravity targets are cleared by the runtime mode callback.
-
-        Any pending N-body spawn is cancelled when switching modes.
-        """
-
-        self.cancel_n_body_spawn()
-
-        if self.gravity_mode == "single":
-            self.gravity_mode = "multi"
-
-            self.mode_button.configure(
-                text=(
-                    "Switch to "
-                    "Single-Point Gravity"
-                )
-            )
-
-            self.set_gravity_mode_callback(
-                "multi"
-            )
-
-            self._build_settings_layout(
-                MULTI_FIELDS
-            )
-
-        else:
-            self.gravity_mode = "single"
-
-            self.mode_button.configure(
-                text=(
-                    "Switch to "
-                    "Multi-Point Gravity"
-                )
-            )
-
-            self.set_gravity_mode_callback(
-                "single"
-            )
-
-            self._build_settings_layout(
-                CLASSIC_FIELDS
-            )
-
-        self.reload()
-
-    # --------------------------------------------------------
     # N-body spawn scheduling
     # --------------------------------------------------------
 
-    def schedule_n_body_spawn(
-        self,
-        preset_name,
-        callback,
-    ):
+    def schedule_n_body_spawn(self, preset_name, callback):
         """
-        Schedule an N-body preset after the configured delay.
+        Schedule a placement preset after the configured delay.
 
-        The cursor position is not captured when the button is pressed.
-        The runtime callback reads the cursor position when the timer
-        finishes, allowing the user to move the cursor during the delay.
-
-        If another N-body preset is already waiting, it is cancelled.
+        The cursor position is intentionally read by the runtime callback
+        only when the delay finishes. This allows the user to move the
+        cursor after pressing a preset button.
 
         Args:
-            preset_name:
-                Human-readable name displayed in the status label.
-
-            callback:
-                Runtime function that performs the actual spawn.
+            preset_name: Human-readable preset name for UI/log messages.
+            callback: Runtime function that creates the point pattern.
         """
-
-        # Read directly from the entry rather than config.
-        #
-        # This lets the user change the timer and immediately press an
-        # N-body button without having to press Apply first.
-        delay_variable = (
-            self.variables.get(
-                "n_body_spawn_delay"
-            )
+        delay_variable = self.variables.get(
+            "n_body_spawn_delay"
         )
 
         if delay_variable is None:
-            delay_seconds = (
-                config.n_body_spawn_delay
-            )
-
+            delay_seconds = config.n_body_spawn_delay
         else:
             try:
                 delay_seconds = float(
                     delay_variable.get()
                 )
-
             except ValueError:
                 messagebox.showerror(
                     "Invalid Spawn Delay",
-                    (
-                        "N Body Spawn Delay "
-                        "must be a valid number."
-                    ),
+                    "N Body Spawn Delay must be a valid number.",
                     parent=self.window,
                 )
-
                 return
 
         if delay_seconds < 0:
             messagebox.showerror(
                 "Invalid Spawn Delay",
-                (
-                    "N Body Spawn Delay "
-                    "cannot be negative."
-                ),
+                "N Body Spawn Delay cannot be negative.",
                 parent=self.window,
             )
-
             return
 
-        # Only one delayed N-body spawn can be active.
         self.cancel_n_body_spawn(
             clear_status=False
         )
 
-        delay_ms = round(
-            delay_seconds * 1000
-        )
-
         self.n_body_status_var.set(
-            f"{preset_name} spawning in "
-            f"{delay_seconds:g} seconds..."
+            f"{preset_name} spawning in {delay_seconds:g} seconds..."
         )
 
-        self.n_body_spawn_after_id = (
-            self.window.after(
-                delay_ms,
-                lambda: (
-                    self._run_n_body_spawn(
-                        preset_name,
-                        callback,
-                    )
-                ),
-            )
+        self.n_body_spawn_after_id = self.window.after(
+            round(delay_seconds * 1000),
+            lambda: self._run_n_body_spawn(
+                preset_name,
+                callback,
+            ),
         )
 
         self.logger.info(
-            "N_BODY_SPAWN_SCHEDULED | "
-            "preset=%s | delay=%s",
+            "N_BODY_SPAWN_SCHEDULED | preset=%s | delay=%s",
             preset_name,
             delay_seconds,
         )
 
-    def _run_n_body_spawn(
-        self,
-        preset_name,
-        callback,
-    ):
+    def _run_n_body_spawn(self, preset_name, callback):
         """
-        Execute a scheduled N-body spawn.
+        Execute a scheduled placement preset.
 
         Args:
-            preset_name:
-                Human-readable preset name.
-
-            callback:
-                Runtime spawn callback.
+            preset_name: Human-readable preset name.
+            callback: Runtime function that creates the point pattern.
         """
-
-        # The scheduled timer has completed.
         self.n_body_spawn_after_id = None
 
         try:
@@ -998,8 +684,7 @@ class SettingsWindow:
 
         except Exception as exc:
             self.logger.error(
-                "N_BODY_SPAWN_ERROR | "
-                "preset=%s | error=%s",
+                "N_BODY_SPAWN_ERROR | preset=%s | error=%s",
                 preset_name,
                 exc,
                 exc_info=True,
@@ -1022,79 +707,53 @@ class SettingsWindow:
         )
 
         self.logger.info(
-            "N_BODY_SPAWN_COMPLETE | "
-            "preset=%s",
+            "N_BODY_SPAWN_COMPLETE | preset=%s",
             preset_name,
         )
 
-    def cancel_n_body_spawn(
-        self,
-        clear_status=True,
-    ):
+    def cancel_n_body_spawn(self, clear_status=True):
         """
-        Cancel a pending N-body spawn timer.
+        Cancel a pending placement-preset timer.
 
         Args:
-            clear_status:
-                If True, clear the N-body status label.
+            clear_status: Clear the status label when True.
         """
-
-        if (
-            self.n_body_spawn_after_id
-            is not None
-        ):
+        if self.n_body_spawn_after_id is not None:
             try:
                 self.window.after_cancel(
                     self.n_body_spawn_after_id
                 )
-
             except tk.TclError:
                 pass
 
-            self.n_body_spawn_after_id = (
-                None
-            )
+            self.n_body_spawn_after_id = None
 
             self.logger.info(
                 "N_BODY_SPAWN_CANCELLED"
             )
 
         if clear_status:
-            self.n_body_status_var.set(
-                ""
-            )
+            self.n_body_status_var.set("")
 
     # --------------------------------------------------------
     # Preset / dirty state
     # --------------------------------------------------------
 
-    def _highlight_preset(
-        self,
-        preset_name,
-    ):
+    def _highlight_preset(self, preset_name):
         """
-        Highlight the selected configuration preset.
+        Highlight the selected physics preset.
 
         Args:
-            preset_name:
-                Name of the selected preset.
+            preset_name: Name of the selected preset.
         """
+        self.selected_preset = preset_name
 
-        self.selected_preset = (
-            preset_name
-        )
-
-        for (
-            name,
-            button,
-        ) in self.preset_buttons.items():
-
+        for name, button in self.preset_buttons.items():
             if name == preset_name:
                 button.configure(
                     bg=PRESET_SELECTED_BG,
                     relief="sunken",
                 )
-
             else:
                 button.configure(
                     bg=PRESET_NORMAL_BG,
@@ -1106,45 +765,28 @@ class SettingsWindow:
             relief="raised",
         )
 
-    def _mark_dirty(
-        self,
-        *args,
-    ):
+    def _mark_dirty(self, *args):
         """
-        Update the Apply button when fields differ from config.
+        Update Apply-button state when entry values differ from config.
 
-        Tkinter variable traces provide positional arguments, so *args is
-        accepted even though those values are not needed.
+        Tkinter variable traces pass positional arguments, so ``*args`` is
+        accepted even though those values are not used.
         """
-
         has_changes = False
 
-        for (
-            field_name,
-            variable,
-        ) in self.variables.items():
-
+        for field_name, variable in self.variables.items():
             try:
-                input_value = (
-                    self._convert_value(
-                        field_name,
-                        variable.get(),
-                    )
+                input_value = self._convert_value(
+                    field_name,
+                    variable.get(),
                 )
-
             except ValueError:
-                # Invalid text is still an unapplied change.
                 has_changes = True
                 break
 
-            current_value = getattr(
+            if input_value != getattr(
                 config,
                 field_name,
-            )
-
-            if (
-                input_value
-                != current_value
             ):
                 has_changes = True
                 break
@@ -1164,18 +806,13 @@ class SettingsWindow:
         if has_changes:
             self.selected_preset = None
 
-            for button in (
-                self.preset_buttons.values()
-            ):
+            for button in self.preset_buttons.values():
                 button.configure(
                     bg=PRESET_NORMAL_BG,
                     relief="raised",
                 )
 
-            if hasattr(
-                self,
-                "defaults_button",
-            ):
+            if hasattr(self, "defaults_button"):
                 self.defaults_button.configure(
                     bg=PRESET_NORMAL_BG,
                     relief="raised",
@@ -1189,50 +826,30 @@ class SettingsWindow:
     # Settings fields
     # --------------------------------------------------------
 
-    def _create_setting_row(
-        self,
-        field_name,
-        row,
-    ):
+    def _create_setting_row(self, field_name, row):
         """
-        Create one label and entry for a config setting.
+        Create one label/entry pair for a config setting.
 
         Args:
-            field_name:
-                Attribute name on config.
-
-            row:
-                Grid row where the controls are placed.
+            field_name: Attribute name on ``config``.
+            row: Grid row for the controls.
 
         Raises:
-            AttributeError:
-                If the requested field does not exist on config.
+            AttributeError: If ``field_name`` does not exist on config.
         """
-
-        if not hasattr(
-            config,
-            field_name,
-        ):
+        if not hasattr(config, field_name):
             raise AttributeError(
-                (
-                    "Config has no setting named "
-                    f"{field_name!r}"
-                )
+                f"Config has no setting named {field_name!r}"
             )
 
-        # Keep StringVars when rebuilding layouts so typed values are not
-        # lost just because the user switches gravity modes.
-        if (
-            field_name
-            not in self.variables
-        ):
+        if field_name not in self.variables:
             variable = tk.StringVar(
                 value=str(
                     getattr(
                         config,
                         field_name,
                     )
-                ),
+                )
             )
 
             variable.trace_add(
@@ -1240,13 +857,9 @@ class SettingsWindow:
                 self._mark_dirty,
             )
 
-            self.variables[
-                field_name
-            ] = variable
+            self.variables[field_name] = variable
 
-        variable = self.variables[
-            field_name
-        ]
+        variable = self.variables[field_name]
 
         display_name = (
             field_name
@@ -1282,29 +895,20 @@ class SettingsWindow:
             weight=1,
         )
 
-    def _convert_value(
-        self,
-        field_name,
-        text,
-    ):
+    def _convert_value(self, field_name, text):
         """
-        Convert entry text to the config field's existing type.
+        Convert an entry string to the config field's existing type.
 
         Args:
-            field_name:
-                Config attribute being converted.
-
-            text:
-                Raw text from the Tkinter entry.
+            field_name: Config attribute being converted.
+            text: Raw entry text.
 
         Returns:
-            Value converted to the config field's type.
+            The converted value.
 
         Raises:
-            ValueError:
-                If the value cannot be converted.
+            ValueError: If the value cannot be converted.
         """
-
         current_value = getattr(
             config,
             field_name,
@@ -1314,68 +918,25 @@ class SettingsWindow:
             current_value
         )
 
-        if expected_type is bool:
-            normalized = (
-                text
-                .strip()
-                .lower()
-            )
-
-            if normalized in {
-                "true",
-                "1",
-                "yes",
-                "on",
-            }:
-                return True
-
-            if normalized in {
-                "false",
-                "0",
-                "no",
-                "off",
-            }:
-                return False
-
-            raise ValueError(
-                (
-                    f"{field_name} must be "
-                    "true or false"
-                )
-            )
-
         try:
-            return expected_type(
-                text
-            )
+            return expected_type(text)
 
         except ValueError as exc:
             raise ValueError(
-                (
-                    f"{field_name} must be a valid "
-                    f"{expected_type.__name__}"
-                )
+                f"{field_name} must be a valid {expected_type.__name__}"
             ) from exc
 
     # --------------------------------------------------------
     # Presets
     # --------------------------------------------------------
 
-    def load_preset(
-        self,
-        preset_name,
-    ):
+    def load_preset(self, preset_name):
         """
-        Load a configuration preset into the input fields.
-
-        Loading a preset does not immediately update the runtime config.
-        The user must press Apply.
+        Load a physics preset into the input fields without applying it.
 
         Args:
-            preset_name:
-                Name of the preset in PRESETS.
+            preset_name: Name of the preset in ``PRESETS``.
         """
-
         preset = PRESETS.get(
             preset_name
         )
@@ -1383,20 +944,11 @@ class SettingsWindow:
         if preset is None:
             return
 
-        for (
-            field_name,
-            value,
-        ) in preset.items():
-
-            if (
-                field_name
-                not in self.variables
-            ):
+        for field_name, value in preset.items():
+            if field_name not in self.variables:
                 continue
 
-            self.variables[
-                field_name
-            ].set(
+            self.variables[field_name].set(
                 str(value)
             )
 
@@ -1415,24 +967,15 @@ class SettingsWindow:
 
     def reset_to_defaults(self):
         """
-        Load MouseGravityConfig default values into the input fields.
+        Load default GravityConfig values into the input fields.
 
-        The defaults are not applied to the simulation until Apply is pressed.
+        Defaults are not applied to the running simulation until Apply is
+        pressed.
         """
+        defaults = GravityConfig()
 
-        defaults = (
-            MouseGravityConfig()
-        )
-
-        for (
-            field_name,
-            variable,
-        ) in self.variables.items():
-
-            if not hasattr(
-                defaults,
-                field_name,
-            ):
+        for field_name, variable in self.variables.items():
+            if not hasattr(defaults, field_name):
                 continue
 
             variable.set(
@@ -1452,13 +995,9 @@ class SettingsWindow:
             "DEFAULTS_LOADED"
         )
 
-        self.selected_preset = (
-            "Defaults"
-        )
+        self.selected_preset = "Defaults"
 
-        for button in (
-            self.preset_buttons.values()
-        ):
+        for button in self.preset_buttons.values():
             button.configure(
                 bg=PRESET_NORMAL_BG,
                 relief="raised",
@@ -1471,24 +1010,17 @@ class SettingsWindow:
 
     def save_preset_to_log(self):
         """
-        Save the current settings as a candidate preset in the log.
+        Save the current UI settings as a candidate preset in the log.
 
-        This does not automatically modify config.py or PRESETS.
+        This operation does not modify ``config.py`` or ``PRESETS``.
         """
-
         values = {}
 
         try:
-            for (
-                field_name,
-                variable,
-            ) in self.variables.items():
-
-                values[field_name] = (
-                    self._convert_value(
-                        field_name,
-                        variable.get(),
-                    )
+            for field_name, variable in self.variables.items():
+                values[field_name] = self._convert_value(
+                    field_name,
+                    variable.get(),
                 )
 
         except ValueError as exc:
@@ -1497,37 +1029,25 @@ class SettingsWindow:
                 str(exc),
                 parent=self.window,
             )
-
             return
 
-        preset_name = (
-            simpledialog.askstring(
-                "Save Preset",
-                (
-                    "Enter a name "
-                    "for this preset:"
-                ),
-                parent=self.window,
-            )
+        preset_name = simpledialog.askstring(
+            "Save Preset",
+            "Enter a name for this preset:",
+            parent=self.window,
         )
 
         if preset_name is None:
             return
 
-        preset_name = (
-            preset_name.strip()
-        )
+        preset_name = preset_name.strip()
 
         if not preset_name:
             messagebox.showerror(
                 "Invalid Preset Name",
-                (
-                    "Preset name "
-                    "cannot be empty."
-                ),
+                "Preset name cannot be empty.",
                 parent=self.window,
             )
-
             return
 
         self.save_preset_callback(
@@ -1536,18 +1056,12 @@ class SettingsWindow:
         )
 
         self.loaded_preset_var.set(
-            (
-                "Saved for review: "
-                f"{preset_name}"
-            )
+            f"Saved for review: {preset_name}"
         )
 
         messagebox.showinfo(
             "Preset Saved",
-            (
-                f'"{preset_name}" was saved '
-                "to the log for later review."
-            ),
+            f'"{preset_name}" was saved to the log for later review.',
             parent=self.window,
         )
 
@@ -1558,24 +1072,14 @@ class SettingsWindow:
     def apply(self):
         """
         Validate and apply all settings currently stored in the UI.
-
-        Multi-point and N-body-specific settings receive additional
-        validation before the shared config object is changed.
         """
-
         new_values = {}
 
         try:
-            for (
-                field_name,
-                variable,
-            ) in self.variables.items():
-
-                new_values[field_name] = (
-                    self._convert_value(
-                        field_name,
-                        variable.get(),
-                    )
+            for field_name, variable in self.variables.items():
+                new_values[field_name] = self._convert_value(
+                    field_name,
+                    variable.get(),
                 )
 
         except ValueError as exc:
@@ -1584,131 +1088,88 @@ class SettingsWindow:
                 str(exc),
                 parent=self.window,
             )
-
             return
-
-        # ----------------------------------------------------
-        # Multi-point validation
-        # ----------------------------------------------------
 
         point_count = new_values.get(
             "multi_point_count",
             config.multi_point_count,
         )
 
-        if not (
-            1
-            <= point_count
-            <= MAX_GRAVITY_POINTS
-        ):
+        if not 1 <= point_count <= MAX_GRAVITY_POINTS:
             messagebox.showerror(
                 "Invalid Setting",
                 (
-                    "Multi Point Count must be "
-                    f"between 1 and "
+                    "Multi Point Count must be between 1 and "
                     f"{MAX_GRAVITY_POINTS}."
                 ),
                 parent=self.window,
             )
-
             return
 
-        point_gravity_multiplier = (
-            new_values.get(
-                "point_gravity_multiplier",
-                config.point_gravity_multiplier,
-            )
-        )
-
-        if (
-            point_gravity_multiplier
-            < 0
-        ):
-            messagebox.showerror(
-                "Invalid Setting",
-                (
-                    "Point Gravity Multiplier "
-                    "cannot be negative."
-                ),
-                parent=self.window,
-            )
-
-            return
-
-        triangle_radius = (
-            new_values.get(
-                "triangle_spawn_radius",
-                config.triangle_spawn_radius,
-            )
-        )
-
-        if triangle_radius < 0:
-            messagebox.showerror(
-                "Invalid Setting",
-                (
-                    "Triangle Spawn Radius "
-                    "cannot be negative."
-                ),
-                parent=self.window,
-            )
-
-            return
-
-        pentagram_radius = (
-            new_values.get(
-                "pentagram_spawn_radius",
-                config.pentagram_spawn_radius,
-            )
-        )
-
-        if pentagram_radius < 0:
-            messagebox.showerror(
-                "Invalid Setting",
-                (
-                    "Pentagram Spawn Radius "
-                    "cannot be negative."
-                ),
-                parent=self.window,
-            )
-
-            return
-
-        spawn_delay = new_values.get(
+        non_negative_fields = {
+            "point_gravity",
+            "gravity_distance_power",
+            "min_gravity_distance",
+            "max_gravity_acceleration",
+            "body_stop_radius",
+            "point_max_speed",
+            "point_physics_hz",
+            "triangle_spawn_radius",
+            "pentagram_spawn_radius",
             "n_body_spawn_delay",
-            config.n_body_spawn_delay,
-        )
+        }
 
-        if spawn_delay < 0:
-            messagebox.showerror(
-                "Invalid Setting",
-                (
-                    "N Body Spawn Delay "
-                    "cannot be negative."
-                ),
-                parent=self.window,
+        for field_name in non_negative_fields:
+            value = new_values.get(
+                field_name,
+                getattr(config, field_name),
             )
 
+            if value < 0:
+                messagebox.showerror(
+                    "Invalid Setting",
+                    (
+                        field_name
+                        .replace("_", " ")
+                        .title()
+                        + " cannot be negative."
+                    ),
+                    parent=self.window,
+                )
+                return
+
+        if new_values.get(
+            "point_physics_hz",
+            config.point_physics_hz,
+        ) <= 0:
+            messagebox.showerror(
+                "Invalid Setting",
+                "Point Physics Hz must be greater than zero.",
+                parent=self.window,
+            )
             return
 
-        # ----------------------------------------------------
-        # Apply changes
-        # ----------------------------------------------------
+        point_drag = new_values.get(
+            "point_drag",
+            config.point_drag,
+        )
+
+        if not 0 < point_drag <= 1:
+            messagebox.showerror(
+                "Invalid Setting",
+                "Point Drag must be greater than 0 and at most 1.",
+                parent=self.window,
+            )
+            return
 
         with self.state_lock:
-            for (
-                field_name,
-                new_value,
-            ) in new_values.items():
-
+            for field_name, new_value in new_values.items():
                 old_value = getattr(
                     config,
                     field_name,
                 )
 
-                if (
-                    old_value
-                    == new_value
-                ):
+                if old_value == new_value:
                     continue
 
                 setattr(
@@ -1718,10 +1179,7 @@ class SettingsWindow:
                 )
 
                 self.logger.info(
-                    (
-                        "CONFIG_CHANGE | "
-                        "%s | old=%s | new=%s"
-                    ),
+                    "CONFIG_CHANGE | %s | old=%s | new=%s",
                     field_name,
                     old_value,
                     new_value,
@@ -1729,10 +1187,7 @@ class SettingsWindow:
 
         self.dirty = False
 
-        if (
-            self.apply_button
-            is not None
-        ):
+        if self.apply_button is not None:
             self.apply_button.configure(
                 bg=APPLY_NORMAL_BG,
                 relief="raised",
@@ -1740,15 +1195,10 @@ class SettingsWindow:
 
     def reload(self):
         """
-        Reload all existing UI variables from the active config object.
+        Reload all existing input variables from the active config object.
         """
-
         with self.state_lock:
-            for (
-                field_name,
-                variable,
-            ) in self.variables.items():
-
+            for field_name, variable in self.variables.items():
                 variable.set(
                     str(
                         getattr(
@@ -1760,10 +1210,7 @@ class SettingsWindow:
 
         self.dirty = False
 
-        if (
-            self.apply_button
-            is not None
-        ):
+        if self.apply_button is not None:
             self.apply_button.configure(
                 bg=APPLY_NORMAL_BG,
                 relief="raised",
@@ -1775,25 +1222,16 @@ class SettingsWindow:
 
     def _refresh_point_status(self):
         """
-        Periodically update the number of placed gravity points.
+        Refresh the point count twice per second.
 
-        This information does not require physics-frame-frequency updates,
-        so it refreshes twice per second to reduce UI work.
+        Point-count display does not need physics-frame-frequency updates,
+        so a low refresh rate avoids unnecessary UI work.
         """
-
         try:
-            (
-                placed,
-                limit,
-            ) = (
-                self.get_point_status_callback()
-            )
+            placed, limit = self.get_point_status_callback()
 
             self.point_status_var.set(
-                (
-                    "Points placed: "
-                    f"{placed}/{limit}"
-                )
+                f"Points placed: {placed}/{limit}"
             )
 
             self.window.after(
@@ -1811,24 +1249,18 @@ class SettingsWindow:
 
     def show(self):
         """
-        Reload current values and display the settings window.
+        Reload current config values and display the settings window.
         """
-
         self.reload()
-
         self.window.deiconify()
-
         self.window.lift()
-
         self.window.focus_force()
 
     def hide(self):
         """
         Hide the settings window without destroying it.
 
-        A pending N-body spawn is intentionally not cancelled here. This
-        allows the user to press a preset button, hide the settings window,
-        move the cursor to the desired location, and allow the timer to finish.
+        A pending placement preset is intentionally left active so the user
+        can hide the window and reposition the cursor before the timer ends.
         """
-
         self.window.withdraw()

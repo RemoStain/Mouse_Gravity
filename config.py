@@ -1,61 +1,59 @@
 from dataclasses import dataclass
 
 
-# Hard safety/performance limit for multi-point mode.
-# With five points there are at most 10 point-to-point pairs.
+# Hard safety/performance limit for the N-body simulation.
+# Five points produce at most 10 unique point-to-point calculations.
 MAX_GRAVITY_POINTS = 5
 
 
 @dataclass
-class MouseGravityConfig:
+class GravityConfig:
     """
-    Configuration for the mouse gravity simulation.
+    Runtime configuration for the gravity-point N-body simulation.
+
+    The mouse is used only for point placement and preset positioning.
+    These settings affect gravity-point motion, placement, logging, and
+    click recognition; they do not control or move the mouse cursor.
     """
 
     # --------------------------------------------------------
-    # Gravity
+    # Point-to-point gravity
     # --------------------------------------------------------
 
-    gravity: float = 2000.0
+    # Base gravity acceleration at reference_distance.
+    point_gravity: float = 4.0
+
+    # Distance used as the baseline for the gravity falloff equation.
     reference_distance: float = 300.0
+
+    # Exponent controlling how quickly gravity changes with distance.
     gravity_distance_power: float = 1.5
+
+    # Distances below this value use this value for force calculations,
+    # preventing excessively large acceleration near another point.
     min_gravity_distance: float = 25.0
+
+    # Hard acceleration cap for point-to-point gravity.
     max_gravity_acceleration: float = 6000.0
 
-    # --------------------------------------------------------
-    # Momentum
-    # --------------------------------------------------------
-
-    max_speed: float = 2500.0
-    drag: float = 0.9999
-    stop_radius: float = 5.0
-    fps: int = 120
-
-    # --------------------------------------------------------
-    # Physical mouse input
-    # --------------------------------------------------------
-
-    normal_input_strength: float = 7.0
-    toward_input_multiplier: float = 1.0
-    away_input_multiplier: float = 0.35
-
-    # --------------------------------------------------------
-    # Multi-point gravity
-    # --------------------------------------------------------
-
-    # Number of points the user can place in multi-point mode.
-    # This is validated against MAX_GRAVITY_POINTS in the UI.
-    multi_point_count: int = 5
-
-    # Gravity points attract each other at a much weaker strength
-    # than they attract the cursor.
-    point_gravity_multiplier: float = 0.002
-    point_drag: float = 0.99
-    point_max_speed: float = 100.0
-
+    # Distance at which two gravity points are considered merged.
     body_stop_radius: float = 5.0
 
+    # --------------------------------------------------------
+    # Point motion
+    # --------------------------------------------------------
 
+    # Number of gravity points the user may place.
+    multi_point_count: int = 5
+
+    # Velocity damping. Values closer to 1 preserve momentum longer.
+    point_drag: float = 0.99
+
+    # Maximum gravity-point speed in pixels per second.
+    point_max_speed: float = 100.0
+
+    # Physics update rate for gravity-point movement.
+    point_physics_hz: float = 30.0
 
     # --------------------------------------------------------
     # N-body placement presets
@@ -65,14 +63,15 @@ class MouseGravityConfig:
     triangle_spawn_radius: float = 300.0
     pentagram_spawn_radius: float = 300.0
 
-    # Delay after pressing an N-body preset button.
-    # This gives the user time to move the cursor to the desired center point.
+    # Delay after pressing an N-body preset button. This gives the user
+    # time to move the cursor to the desired center before spawning.
     n_body_spawn_delay: float = 3.0
 
     # --------------------------------------------------------
     # Click recognition
     # --------------------------------------------------------
 
+    # Maximum delay between clicks belonging to one click sequence.
     click_sequence_timeout: float = 0.35
 
     # --------------------------------------------------------
@@ -80,109 +79,79 @@ class MouseGravityConfig:
     # --------------------------------------------------------
 
     logging_enabled_by_default: bool = True
-    log_telemetry_hz: int = 5
 
 
-config = MouseGravityConfig()
+config = GravityConfig()
 
 
+# Presets now contain only settings relevant to gravity-point physics.
+# Existing preset names are retained where their values can be translated
+# meaningfully to the N-body-only branch.
 PRESETS = {
     "Balanced": {
-        "gravity": 1500.0,
+        "point_gravity": 3.0,
         "reference_distance": 300.0,
         "gravity_distance_power": 1.0,
         "min_gravity_distance": 40.0,
         "max_gravity_acceleration": 5000.0,
-        "max_speed": 2000.0,
-        "drag": 0.999,
-        "stop_radius": 2.0,
-        "fps": 120,
-        "normal_input_strength": 10.0,
-        "toward_input_multiplier": 1.0,
-        "away_input_multiplier": 0.4,
+        "body_stop_radius": 2.0,
+        "point_drag": 0.99,
+        "point_max_speed": 100.0,
+        "point_physics_hz": 30.0,
     },
     "Stable Orbit": {
-        "gravity": 2000.0,
+        "point_gravity": 4.0,
         "reference_distance": 350.0,
         "gravity_distance_power": 0.9,
         "min_gravity_distance": 50.0,
         "max_gravity_acceleration": 4500.0,
-        "max_speed": 3200.0,
-        "drag": 0.9995,
-        "stop_radius": 1.0,
-        "fps": 120,
-        "normal_input_strength": 10.0,
-        "toward_input_multiplier": 1.0,
-        "away_input_multiplier": 0.25,
+        "body_stop_radius": 1.0,
+        "point_drag": 0.99,
+        "point_max_speed": 100.0,
+        "point_physics_hz": 30.0,
     },
     "Heavy Gravity": {
-        "gravity": 5000.0,
+        "point_gravity": 10.0,
         "reference_distance": 250.0,
         "gravity_distance_power": 2.0,
         "min_gravity_distance": 50.0,
         "max_gravity_acceleration": 6500.0,
-        "max_speed": 2200.0,
-        "drag": 0.995,
-        "stop_radius": 2.0,
-        "fps": 120,
-        "normal_input_strength": 10.0,
-        "toward_input_multiplier": 1.0,
-        "away_input_multiplier": 0.2,
+        "body_stop_radius": 2.0,
+        "point_drag": 0.99,
+        "point_max_speed": 100.0,
+        "point_physics_hz": 30.0,
     },
     "Light Gravity": {
-        "gravity": 1000.0,
+        "point_gravity": 2.0,
         "reference_distance": 400.0,
         "gravity_distance_power": 1.2,
         "min_gravity_distance": 30.0,
         "max_gravity_acceleration": 4000.0,
-        "max_speed": 1800.0,
-        "drag": 0.9998,
-        "stop_radius": 3.0,
-        "fps": 120,
-        "normal_input_strength": 10.0,
-        "toward_input_multiplier": 1.0,
-        "away_input_multiplier": 0.5,
+        "body_stop_radius": 3.0,
+        "point_drag": 0.99,
+        "point_max_speed": 100.0,
+        "point_physics_hz": 30.0,
     },
     "Eccentic": {
-        "gravity": 3000.0,
+        "point_gravity": 6.0,
         "reference_distance": 300.0,
-        "gravity_distance_power": 2,
+        "gravity_distance_power": 2.0,
         "min_gravity_distance": 40.0,
         "max_gravity_acceleration": 6000.0,
-        "max_speed": 3000.0,
-        "drag": 0.9999,
-        "stop_radius": 1.0,
-        "fps": 120,
-        "normal_input_strength": 10.0,
-        "toward_input_multiplier": 1.0,
-        "away_input_multiplier": 0.35,
+        "body_stop_radius": 1.0,
+        "point_drag": 0.99,
+        "point_max_speed": 100.0,
+        "point_physics_hz": 30.0,
     },
     "Thick Atmosphere": {
-        "gravity": 4000.0,
+        "point_gravity": 8.0,
         "reference_distance": 500.0,
         "gravity_distance_power": 1.25,
         "min_gravity_distance": 100.0,
         "max_gravity_acceleration": 4000.0,
-        "max_speed": 1500.0,
-        "drag": 0.99,
-        "stop_radius": 5.0,
-        "fps": 120,
-        "normal_input_strength": 10.0,
-        "toward_input_multiplier": 1.0,
-        "away_input_multiplier": 0.35,
+        "body_stop_radius": 5.0,
+        "point_drag": 0.99,
+        "point_max_speed": 100.0,
+        "point_physics_hz": 30.0,
     },
-    "Sicko Mode": {
-        "gravity": 10_000.0,
-        "reference_distance": 75.0,
-        "gravity_distance_power": 25,
-        "min_gravity_distance": 1.0,
-        "max_gravity_acceleration": 60_000.0,
-        "max_speed": 50_000.0,
-        "drag": 0.999999,
-        "stop_radius": 1.0,
-        "fps": 120,
-        "normal_input_strength": 20.0,
-        "toward_input_multiplier": 1.0,
-        "away_input_multiplier": 0.30,
-        }
 }

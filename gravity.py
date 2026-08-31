@@ -1,6 +1,5 @@
 import math
 from dataclasses import dataclass
-from typing import Sequence
 
 from config import config
 
@@ -8,10 +7,17 @@ from config import config
 @dataclass
 class GravityPoint:
     """
-    A movable gravity source used by multi-point mode.
+    A movable gravity source used by the N-body simulation.
 
-    Positions and velocities are stored as floats so the point can move
-    smoothly even though the visible marker is rendered at integer pixels.
+    Positions and velocities are stored as floats so points can move
+    smoothly even though their visible markers are rendered at integer
+    pixel coordinates.
+
+    Attributes:
+        x: Horizontal position on the virtual desktop.
+        y: Vertical position on the virtual desktop.
+        velocity_x: Horizontal velocity in pixels per second.
+        velocity_y: Vertical velocity in pixels per second.
     """
 
     x: float
@@ -20,15 +26,19 @@ class GravityPoint:
     velocity_y: float = 0.0
 
 
-def _gravity_strength(
-    distance: float,
-    multiplier: float = 1.0,
-) -> float:
+def _gravity_strength(distance: float) -> float:
     """
-    Return the configured gravity magnitude for a known distance.
+    Return the configured point-to-point gravity magnitude.
 
-    Keeping this calculation separate avoids recalculating distance in
-    single-point mode and keeps the gravity law consistent everywhere.
+    The configured minimum gravity distance prevents the acceleration from
+    growing without bound at very short distances. The final result is also
+    capped by max_gravity_acceleration.
+
+    Args:
+        distance: Distance between the two gravity points.
+
+    Returns:
+        Gravity acceleration magnitude for the supplied distance.
     """
     gravity_distance = max(
         distance,
@@ -36,147 +46,58 @@ def _gravity_strength(
     )
 
     gravity_strength = (
-        config.gravity
+        config.point_gravity
         * (config.reference_distance / gravity_distance)
         ** config.gravity_distance_power
     )
 
-    gravity_strength = min(
+    return min(
         gravity_strength,
         config.max_gravity_acceleration,
     )
 
-    return gravity_strength * multiplier
 
-
-def gravity_vector(
+def point_gravity_vector(
     source_x: float,
     source_y: float,
     target_x: float,
     target_y: float,
-    multiplier: float = 1.0,
-    body_calculation: bool = False,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, bool]:
     """
-    Calculate acceleration from one position toward another.
+    Calculate acceleration from one gravity point toward another.
+
+    Points that move within body_stop_radius are considered merged. The
+    caller decides which point is removed so point age/order can be handled
+    consistently in one place.
 
     Args:
-        source_x: X coordinate of the object being accelerated.
-        source_y: Y coordinate of the object being accelerated.
-        target_x: X coordinate of the gravity source.
-        target_y: Y coordinate of the gravity source.
-        multiplier: Optional force multiplier.
+        source_x: X coordinate of the point being accelerated.
+        source_y: Y coordinate of the point being accelerated.
+        target_x: X coordinate of the attracting point.
+        target_y: Y coordinate of the attracting point.
 
     Returns:
-        A tuple containing acceleration_x, acceleration_y, and the
-        gravity magnitude.
+        A tuple containing:
+            acceleration_x,
+            acceleration_y,
+            should_merge.
     """
-    # print("Hi! this is the gravity vector function")
     dx = target_x - source_x
     dy = target_y - source_y
 
     distance = math.hypot(dx, dy)
 
-    # Stop applying gravity inside the configured target radius.
-    # Check it its a body calculation so it uses the right config value
-    if body_calculation:
-        if distance <= config.body_stop_radius:
-            # print("body should be removed")
-            # print(f"distance = {distance}")
-            return 0.0, 0.0, math.pi  # Returning pi makes it unlikely to accidentally activate the part that will remove the point
-
-
-    if distance <= config.stop_radius:
-        return 0.0, 0.0, 0.0
-
-    gravity_strength = _gravity_strength(
-        distance,
-        multiplier,
-    )
-
-    inverse_distance = 1.0 / distance
-
-    # print(dx * inverse_distance * gravity_strength)
-    # print(dy * inverse_distance * gravity_strength)
-    # print(gravity_strength)
-    
-
-
-    return (
-        dx * inverse_distance * gravity_strength,
-        dy * inverse_distance * gravity_strength,
-        gravity_strength,
-    )
-
-
-def single_point_gravity(
-    cursor_x: float,
-    cursor_y: float,
-    target_x: float,
-    target_y: float,
-) -> tuple[float, float, float, float, float, float]:
-    """
-    Calculate classic single-target gravity without duplicate distance work.
-
-    Returns:
-        acceleration_x,
-        acceleration_y,
-        radial_x,
-        radial_y,
-        distance,
-        gravity_strength
-    """
-    dx = target_x - cursor_x
-    dy = target_y - cursor_y
-
-    distance = math.hypot(dx, dy)
-
-    if distance <= config.stop_radius:
-        return 0.0, 0.0, 0.0, 0.0, distance, 0.0
+    if distance <= config.body_stop_radius:
+        return 0.0, 0.0, True
 
     gravity_strength = _gravity_strength(distance)
     inverse_distance = 1.0 / distance
 
-    radial_x = dx * inverse_distance
-    radial_y = dy * inverse_distance
-
     return (
-        radial_x * gravity_strength,
-        radial_y * gravity_strength,
-        radial_x,
-        radial_y,
-        distance,
-        gravity_strength,
+        dx * inverse_distance * gravity_strength,
+        dy * inverse_distance * gravity_strength,
+        False,
     )
-
-
-def multi_point_gravity(
-    cursor_x: float,
-    cursor_y: float,
-    points: Sequence[GravityPoint],
-) -> tuple[float, float]:
-    """
-    Return the combined acceleration from all active gravity points.
-
-    The live point objects can be passed directly. With a maximum of five
-    points, the caller can safely hold the shared-state lock for this very
-    small calculation instead of allocating point snapshots every frame.
-    """
-    total_x = 0.0
-    total_y = 0.0
-
-    for point in points:
-        acceleration_x, acceleration_y, _ = gravity_vector(
-            cursor_x,
-            cursor_y,
-            point.x,
-            point.y,
-        )
-
-        total_x += acceleration_x
-        total_y += acceleration_y
-
-    return total_x, total_y
 
 
 def update_gravity_points(
@@ -185,15 +106,19 @@ def update_gravity_points(
     bounds: tuple[float, float, float, float],
 ) -> GravityPoint | None:
     """
-    Advance the gravity points under weak mutual attraction.
+    Advance all gravity points under mutual attraction.
 
-    Point-to-point physics is intended to run at a lower frequency than
-    cursor physics. All pair accelerations are calculated before any point
-    is moved, so the result does not depend on list order.
+    Each unique pair is evaluated once. Accelerations are accumulated before
+    any point is moved, so the result does not depend on update order.
+
+    If two points enter body_stop_radius, the older point is removed. Point
+    age is represented by list order: earlier entries are older than later
+    entries. This matches normal placement behavior where newly created
+    points are appended to the list.
 
     Args:
-        points: Mutable gravity points to update.
-        dt: Elapsed simulation time for this point-physics step.
+        points: Mutable gravity-point list in oldest-to-newest order.
+        dt: Elapsed simulation time in seconds.
         bounds: Virtual desktop bounds as left, top, right, bottom.
 
     Returns:
@@ -204,30 +129,28 @@ def update_gravity_points(
     if point_count < 2:
         return None
 
-    # Two flat lists are cheaper than allocating nested [x, y] lists.
+    # Flat lists avoid repeatedly allocating small nested vectors.
     acceleration_x = [0.0] * point_count
     acceleration_y = [0.0] * point_count
 
-    # Each unique pair is evaluated once. With the hard five-point limit,
-    # this loop performs at most 10 pair calculations per point update.
+    # With the hard five-point limit this evaluates at most 10 pairs.
     for i in range(point_count - 1):
         point = points[i]
 
         for j in range(i + 1, point_count):
             other = points[j]
 
-            pair_ax, pair_ay, remove_point = gravity_vector(
+            pair_ax, pair_ay, should_merge = point_gravity_vector(
                 point.x,
                 point.y,
                 other.x,
                 other.y,
-                multiplier=config.point_gravity_multiplier,
-                body_calculation=True,
             )
 
-            if remove_point == math.pi:
-                removed_point = points.pop(i)
-                return removed_point
+            if should_merge:
+                # i is always older than j because points are stored in
+                # insertion order. Remove the oldest point on collision.
+                return points.pop(i)
 
             acceleration_x[i] += pair_ax
             acceleration_y[i] += pair_ay
@@ -238,10 +161,9 @@ def update_gravity_points(
 
     screen_left, screen_top, screen_right, screen_bottom = bounds
 
-    # point_drag historically behaved like a per-cursor-frame multiplier.
-    # Scale it by dt so lowering the point-physics rate does not materially
-    # change the amount of damping per second.
-    drag_factor = config.point_drag ** (dt * config.fps)
+    # Scale drag by elapsed time so damping remains approximately stable
+    # if the physics update rate changes.
+    drag_factor = config.point_drag ** (dt * config.point_physics_hz)
     max_speed_squared = config.point_max_speed * config.point_max_speed
 
     for index, point in enumerate(points):
@@ -256,7 +178,7 @@ def update_gravity_points(
             + point.velocity_y * point.velocity_y
         )
 
-        # Avoid a square root unless the speed actually needs clamping.
+        # Avoid sqrt unless the speed actually requires clamping.
         if speed_squared > max_speed_squared:
             speed = math.sqrt(speed_squared)
             scale = config.point_max_speed / speed
@@ -267,8 +189,8 @@ def update_gravity_points(
         point.x += point.velocity_x * dt
         point.y += point.velocity_y * dt
 
-        # Points stop at virtual desktop edges rather than disappearing
-        # off-screen.
+        # Gravity points stop at virtual-desktop edges rather than moving
+        # permanently off-screen.
         if point.x <= screen_left:
             point.x = screen_left
 

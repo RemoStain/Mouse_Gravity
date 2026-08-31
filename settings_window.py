@@ -42,7 +42,7 @@ N_BODY_FIELDS = [
     # "multi_point_count",
     "point_drag",
     "point_max_speed",
-    #"point_physics_hz",
+    # "point_physics_hz",
     "triangle_spawn_radius",
     "pentagram_spawn_radius",
     "random_spawn_radius",
@@ -111,7 +111,6 @@ class SettingsWindow:
         spawn_triangle_callback,
         spawn_pentagram_callback,
         spawn_random_callback,
-
     ):
         self.root = root
         self.state_lock = state_lock
@@ -123,7 +122,6 @@ class SettingsWindow:
         self.spawn_triangle_callback = spawn_triangle_callback
         self.spawn_pentagram_callback = spawn_pentagram_callback
         self.spawn_random_callback = spawn_random_callback
-
 
         self.variables = {}
         self.preset_buttons = {}
@@ -138,17 +136,11 @@ class SettingsWindow:
         self.window = tk.Toplevel(root)
         self.window.title("N-Body Gravity Settings")
 
-        self.loaded_preset_var = tk.StringVar(
-            value="Preset: None"
-        )
+        self.loaded_preset_var = tk.StringVar(value="Preset: None")
 
-        self.point_status_var = tk.StringVar(
-            value="Points placed: 0"
-        )
+        self.point_status_var = tk.StringVar(value="Points placed: 0")
 
-        self.n_body_status_var = tk.StringVar(
-            value=""
-        )
+        self.n_body_status_var = tk.StringVar(value="")
 
         self.window.protocol(
             "WM_DELETE_WINDOW",
@@ -377,9 +369,7 @@ class SettingsWindow:
 
         self.settings_frame.bind(
             "<Configure>",
-            lambda event: canvas.configure(
-                scrollregion=canvas.bbox("all")
-            ),
+            lambda event: canvas.configure(scrollregion=canvas.bbox("all")),
         )
 
         canvas_window = canvas.create_window(
@@ -536,9 +526,7 @@ class SettingsWindow:
 
         row += 1
 
-        button_frame = ttk.Frame(
-            self.settings_frame
-        )
+        button_frame = ttk.Frame(self.settings_frame)
 
         button_frame.grid(
             row=row,
@@ -640,17 +628,13 @@ class SettingsWindow:
             preset_name: Human-readable preset name for UI/log messages.
             callback: Runtime function that creates the point pattern.
         """
-        delay_variable = self.variables.get(
-            "n_body_spawn_delay"
-        )
+        delay_variable = self.variables.get("n_body_spawn_delay")
 
         if delay_variable is None:
             delay_seconds = config.n_body_spawn_delay
         else:
             try:
-                delay_seconds = float(
-                    delay_variable.get()
-                )
+                delay_seconds = float(delay_variable.get())
             except ValueError:
                 messagebox.showerror(
                     "Invalid Spawn Delay",
@@ -667,9 +651,7 @@ class SettingsWindow:
             )
             return
 
-        self.cancel_n_body_spawn(
-            clear_status=False
-        )
+        self.cancel_n_body_spawn(clear_status=False)
 
         self.n_body_status_var.set(
             f"{preset_name} spawning in {delay_seconds:g} seconds..."
@@ -710,9 +692,7 @@ class SettingsWindow:
                 exc_info=True,
             )
 
-            self.n_body_status_var.set(
-                f"{preset_name} failed to spawn."
-            )
+            self.n_body_status_var.set(f"{preset_name} failed to spawn.")
 
             messagebox.showerror(
                 "N-Body Spawn Error",
@@ -722,9 +702,7 @@ class SettingsWindow:
 
             return
 
-        self.n_body_status_var.set(
-            f"{preset_name} spawned."
-        )
+        self.n_body_status_var.set(f"{preset_name} spawned.")
 
         self.logger.info(
             "N_BODY_SPAWN_COMPLETE | preset=%s",
@@ -740,17 +718,13 @@ class SettingsWindow:
         """
         if self.n_body_spawn_after_id is not None:
             try:
-                self.window.after_cancel(
-                    self.n_body_spawn_after_id
-                )
+                self.window.after_cancel(self.n_body_spawn_after_id)
             except tk.TclError:
                 pass
 
             self.n_body_spawn_after_id = None
 
-            self.logger.info(
-                "N_BODY_SPAWN_CANCELLED"
-            )
+            self.logger.info("N_BODY_SPAWN_CANCELLED")
 
         if clear_status:
             self.n_body_status_var.set("")
@@ -815,11 +789,7 @@ class SettingsWindow:
 
         if self.apply_button is not None:
             self.apply_button.configure(
-                bg=(
-                    APPLY_DIRTY_BG
-                    if has_changes
-                    else APPLY_NORMAL_BG
-                ),
+                bg=(APPLY_DIRTY_BG if has_changes else APPLY_NORMAL_BG),
                 relief="raised",
             )
 
@@ -838,9 +808,7 @@ class SettingsWindow:
                     relief="raised",
                 )
 
-            self.loaded_preset_var.set(
-                "Preset: Custom"
-            )
+            self.loaded_preset_var.set("Preset: Custom")
 
     # --------------------------------------------------------
     # Settings fields
@@ -858,9 +826,7 @@ class SettingsWindow:
             AttributeError: If ``field_name`` does not exist on config.
         """
         if not hasattr(config, field_name):
-            raise AttributeError(
-                f"Config has no setting named {field_name!r}"
-            )
+            raise AttributeError(f"Config has no setting named {field_name!r}")
 
         if field_name not in self.variables:
             variable = tk.StringVar(
@@ -881,11 +847,7 @@ class SettingsWindow:
 
         variable = self.variables[field_name]
 
-        display_name = (
-            field_name
-            .replace("_", " ")
-            .title()
-        )
+        display_name = field_name.replace("_", " ").title()
 
         ttk.Label(
             self.settings_frame,
@@ -915,7 +877,11 @@ class SettingsWindow:
             weight=1,
         )
 
-    def _convert_value(self, field_name, text):
+    def _convert_value(
+        self,
+        field_name,
+        text,
+    ):
         """
         Convert an entry string to the config field's existing type.
 
@@ -924,31 +890,46 @@ class SettingsWindow:
             text: Raw entry text.
 
         Returns:
-            The converted value.
+            Converted configuration value.
 
         Raises:
-            ValueError: If the value cannot be converted.
+            ValueError: If the text cannot be converted.
         """
         current_value = getattr(
             config,
             field_name,
         )
 
-        expected_type = type(
-            current_value
-        )
+        expected_type = type(current_value)
+
+        if expected_type is bool:
+            normalized = text.strip().lower()
+
+            if normalized in {
+                "true",
+                "1",
+                "yes",
+                "on",
+            }:
+                return True
+
+            if normalized in {
+                "false",
+                "0",
+                "no",
+                "off",
+            }:
+                return False
+
+            raise ValueError(f"{field_name} must be true or false")
 
         try:
             return expected_type(text)
 
         except ValueError as exc:
-            # print(type(current_value))
-            # print(current_value)
-            # print(exc)
             raise ValueError(
-                f"{field_name} must be a valid {expected_type.__name__}"
+                f"{field_name} must be a valid " f"{expected_type.__name__}"
             ) from exc
-
 
     # --------------------------------------------------------
     # Presets
@@ -961,9 +942,7 @@ class SettingsWindow:
         Args:
             preset_name: Name of the preset in ``PRESETS``.
         """
-        preset = PRESETS.get(
-            preset_name
-        )
+        preset = PRESETS.get(preset_name)
 
         if preset is None:
             return
@@ -972,22 +951,16 @@ class SettingsWindow:
             if field_name not in self.variables:
                 continue
 
-            self.variables[field_name].set(
-                str(value)
-            )
+            self.variables[field_name].set(str(value))
 
         self.logger.info(
             "PRESET_LOADED | preset=%s",
             preset_name,
         )
 
-        self.loaded_preset_var.set(
-            f"Preset: {preset_name}"
-        )
+        self.loaded_preset_var.set(f"Preset: {preset_name}")
 
-        self._highlight_preset(
-            preset_name
-        )
+        self._highlight_preset(preset_name)
 
     def reset_to_defaults(self):
         """
@@ -1011,13 +984,9 @@ class SettingsWindow:
                 )
             )
 
-        self.loaded_preset_var.set(
-            "Preset: Defaults"
-        )
+        self.loaded_preset_var.set("Preset: Defaults")
 
-        self.logger.info(
-            "DEFAULTS_LOADED"
-        )
+        self.logger.info("DEFAULTS_LOADED")
 
         self.selected_preset = "Defaults"
 
@@ -1079,9 +1048,7 @@ class SettingsWindow:
             values,
         )
 
-        self.loaded_preset_var.set(
-            f"Saved for review: {preset_name}"
-        )
+        self.loaded_preset_var.set(f"Saved for review: {preset_name}")
 
         messagebox.showinfo(
             "Preset Saved",
@@ -1122,10 +1089,7 @@ class SettingsWindow:
         if not 1 <= point_count <= MAX_GRAVITY_POINTS:
             messagebox.showerror(
                 "Invalid Setting",
-                (
-                    "Multi Point Count must be between 1 and "
-                    f"{MAX_GRAVITY_POINTS}."
-                ),
+                ("Multi Point Count must be between 1 and " f"{MAX_GRAVITY_POINTS}."),
                 parent=self.window,
             )
             return
@@ -1152,20 +1116,18 @@ class SettingsWindow:
             if value < 0:
                 messagebox.showerror(
                     "Invalid Setting",
-                    (
-                        field_name
-                        .replace("_", " ")
-                        .title()
-                        + " cannot be negative."
-                    ),
+                    (field_name.replace("_", " ").title() + " cannot be negative."),
                     parent=self.window,
                 )
                 return
 
-        if new_values.get(
-            "point_physics_hz",
-            config.point_physics_hz,
-        ) <= 0:
+        if (
+            new_values.get(
+                "point_physics_hz",
+                config.point_physics_hz,
+            )
+            <= 0
+        ):
             messagebox.showerror(
                 "Invalid Setting",
                 "Point Physics Hz must be greater than zero.",
@@ -1254,9 +1216,7 @@ class SettingsWindow:
         try:
             placed, limit = self.get_point_status_callback()
 
-            self.point_status_var.set(
-                f"Points placed: {placed}/{limit}"
-            )
+            self.point_status_var.set(f"Points placed: {placed}/{limit}")
 
             self.window.after(
                 500,

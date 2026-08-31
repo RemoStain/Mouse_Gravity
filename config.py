@@ -23,11 +23,6 @@ class GravityConfig:
     # Base gravity acceleration at reference_distance.
     point_gravity: float = 8.0
 
-    # Optional: Boost for last placed point.
-    last_placed_boost: float = 3.0
-    # Also increase drag to simulate more inertia
-    last_placed_drag: float = 6.0
-
     # Distance used as the baseline for the gravity falloff equation.
     reference_distance: float = 300.0
 
@@ -59,6 +54,23 @@ class GravityConfig:
 
     # Physics update rate for gravity-point movement.
     point_physics_hz: float = 30.0
+
+    # --------------------------------------------------------
+    # Placement bias
+    # --------------------------------------------------------
+
+    # Enable special behavior for the most recently manually placed point.
+
+    # Placement presets begin without a biased point. Bias becomes active
+    # only after the user manually adds another point.
+    place_bias_enabled: bool = True
+
+    # The newest manually placed point attracts other points more strongly.
+    last_placed_boost: float = 3.0
+
+    # Additional damping applied to the newest manually placed point.
+    last_placed_drag: float = 6.0
+
 
     # --------------------------------------------------------
     # N-body placement presets
@@ -187,5 +199,5 @@ PRESETS = {
         "point_drag": 0.9999,
         "point_max_speed": 5000.0,
         "point_physics_hz": 60,
-        }
+    },
 }

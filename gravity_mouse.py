@@ -1,26 +1,21 @@
 """
 Runtime application for the gravity-point N-body simulation.
 
-The mouse cursor is never programmatically moved by this module. Mouse input
-is used only for:
+Mouse input is used only to:
 
-- Double-click placement of gravity points.
-- Triple-click clearing of all gravity points.
-- Quadruple-click shutdown.
-- Reading the cursor position when triangle or pentagram presets spawn.
+- Double-click to place a gravity point.
+- Triple-click to clear all gravity points.
+- Quadruple-click to exit.
+- Position N-body placement presets.
 
-Gravity points attract each other, move independently across the virtual
-desktop, merge when sufficiently close, and are displayed using click-through
-Tkinter marker windows.
+The application never programmatically moves the mouse cursor.
 """
 
 import ctypes
 
-# DPI awareness must be initialized before mouse/display-dependent modules.
+# DPI awareness must be initialized before display-dependent modules.
 try:
-    ctypes.windll.user32.SetProcessDpiAwarenessContext(
-        ctypes.c_void_p(-4)
-    )
+    ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
 except Exception:
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -33,8 +28,8 @@ from pathlib import Path
 
 import logging
 import math
-import random
 import os
+import random
 import threading
 import time
 import tkinter as tk
@@ -52,13 +47,12 @@ from settings_window import SettingsWindow
 # Shared state
 # ------------------------------------------------------------
 
-# Gravity points are stored oldest-to-newest. New points are always appended,
-# allowing collision logic to consistently remove the oldest merged point.
+# Points are stored oldest-to-newest.
 gravity_points: list[GravityPoint] = []
 
-# TODO
-# Add place_bias support so the preset shapes do not have any bias until the user adds a point
-place_bias = True
+# True only when the newest point was manually placed.
+# Placement presets begin with no biased point.
+place_bias_active = False
 
 click_count = 0
 last_click_time = 0.0
@@ -70,12 +64,9 @@ state_lock = threading.Lock()
 running = threading.Event()
 running.set()
 
-# Wakes the physics thread immediately when point state changes. This keeps
-# idle CPU usage low without adding noticeable delay after placement.
 physics_wake_event = threading.Event()
 
-# Controller is only used to READ the cursor position for placement presets.
-# The application never writes to controller.position.
+# Used only to READ the cursor position.
 controller = mouse.Controller()
 
 tray_icon = None
@@ -83,6 +74,13 @@ listener = None
 
 tk_root = None
 settings_ui = None
+
+last_frame_error = ""
+
+
+# ------------------------------------------------------------
+# Marker state
+# ------------------------------------------------------------
 
 target_markers = []
 target_marker_visible = []
@@ -92,20 +90,14 @@ MARKER_SIZE = 12
 MARKER_COLOR = "#00ff00"
 MARKER_TRANSPARENT_COLOR = "#010101"
 
-# Marker movement is visual only; 30 FPS is sufficient for these overlays.
 MARKER_REFRESH_MS = 33
 
-# When fewer than two points exist there is no point-to-point motion to
-# calculate. A low-rate safety poll is retained in case an external state
-# change occurs without explicitly setting physics_wake_event.
 IDLE_PHYSICS_HZ = 10.0
 IDLE_PHYSICS_INTERVAL = 1.0 / IDLE_PHYSICS_HZ
 
-last_frame_error = ""
-
 
 # ------------------------------------------------------------
-# Logging state
+# Logging
 # ------------------------------------------------------------
 
 logging_enabled = False
@@ -119,8 +111,188 @@ logger.setLevel(logging.DEBUG)
 logger.propagate = False
 
 
+def get_log_directory() -> Path:
+    """
+    Return the application's log directory.
+
+    The directory is created beside this script if it does not exist.
+
+    Returns:
+        Path to the log directory.
+    """
+    log_directory = Path(__file__).resolve().parent / "logs"
+
+    log_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    return log_directory
+
+
+def start_logging() -> None:
+    """
+    Start logging to a timestamped file.
+
+    Calling this function while logging is already enabled has no effect.
+    """
+    global logging_enabled
+    global log_handler
+    global log_path
+
+    with logging_lock:
+        if log_handler is not None:
+            return
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        log_path = get_log_directory() / f"nbody_gravity_{timestamp}.log"
+
+        log_handler = logging.FileHandler(
+            log_path,
+            encoding="utf-8",
+        )
+
+        log_handler.setLevel(logging.DEBUG)
+
+        log_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s.%(msecs)03d | " "%(levelname)-8s | " "%(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+
+        logger.addHandler(log_handler)
+
+        logging_enabled = True
+
+    logger.info("LOGGING | enabled")
+
+    log_configuration()
+
+    print(f"Logging enabled: {log_path}")
+
+
+def stop_logging() -> None:
+    """
+    Stop logging and close the current log file.
+    """
+    global logging_enabled
+    global log_handler
+
+    with logging_lock:
+        if log_handler is None:
+            logging_enabled = False
+            return
+
+        logger.info("LOGGING | disabled")
+
+        handler = log_handler
+
+        logger.removeHandler(handler)
+
+        handler.flush()
+        handler.close()
+
+        log_handler = None
+        logging_enabled = False
+
+    print("Logging disabled.")
+
+
+def log_configuration() -> None:
+    """
+    Write the current simulation configuration to the log.
+    """
+    logger.info("N-Body Gravity started")
+
+    logger.info(
+        "CONFIG | "
+        "point_gravity=%s | "
+        "reference_distance=%s | "
+        "gravity_distance_power=%s | "
+        "min_gravity_distance=%s | "
+        "max_gravity_acceleration=%s | "
+        "body_stop_radius=%s",
+        config.point_gravity,
+        config.reference_distance,
+        config.gravity_distance_power,
+        config.min_gravity_distance,
+        config.max_gravity_acceleration,
+        config.body_stop_radius,
+    )
+
+    logger.info(
+        "CONFIG | " "last_placed_boost=%s | " "last_placed_drag=%s",
+        config.last_placed_boost,
+        config.last_placed_drag,
+    )
+
+    logger.info(
+        "CONFIG | "
+        "multi_point_count=%s | "
+        "point_drag=%s | "
+        "point_max_speed=%s | "
+        "point_physics_hz=%s",
+        config.multi_point_count,
+        config.point_drag,
+        config.point_max_speed,
+        config.point_physics_hz,
+    )
+
+    logger.info(
+        "CONFIG | "
+        "triangle_spawn_radius=%s | "
+        "pentagram_spawn_radius=%s | "
+        "random_spawn_radius=%s | "
+        "random_spawn_number=%s | "
+        "n_body_spawn_delay=%s",
+        config.triangle_spawn_radius,
+        config.pentagram_spawn_radius,
+        config.random_spawn_radius,
+        config.random_spawn_number,
+        config.n_body_spawn_delay,
+    )
+
+
+def log_candidate_preset(
+    preset_name: str,
+    values: dict,
+) -> None:
+    """
+    Save a user-created preset to the log for later review.
+
+    Args:
+        preset_name:
+            User-selected preset name.
+
+        values:
+            Mapping of config fields to their proposed values.
+    """
+    if not logging_enabled:
+        start_logging()
+
+    logger.info(
+        "USER_PRESET_BEGIN | name=%s",
+        preset_name,
+    )
+
+    for field_name, value in values.items():
+        logger.info(
+            "USER_PRESET_VALUE | " "name=%s | " "%s=%s",
+            preset_name,
+            field_name,
+            value,
+        )
+
+    logger.info(
+        "USER_PRESET_END | name=%s",
+        preset_name,
+    )
+
+
 # ------------------------------------------------------------
-# Virtual desktop bounds
+# Virtual desktop
 # ------------------------------------------------------------
 
 user32 = ctypes.windll.user32
@@ -131,12 +303,15 @@ SM_CXVIRTUALSCREEN = 78
 SM_CYVIRTUALSCREEN = 79
 
 SCREEN_LEFT = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+
 SCREEN_TOP = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
 
 SCREEN_WIDTH = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+
 SCREEN_HEIGHT = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
 
 SCREEN_RIGHT = SCREEN_LEFT + SCREEN_WIDTH - 1
+
 SCREEN_BOTTOM = SCREEN_TOP + SCREEN_HEIGHT - 1
 
 SCREEN_BOUNDS = (
@@ -146,7 +321,6 @@ SCREEN_BOUNDS = (
     SCREEN_BOTTOM,
 )
 
-
 print(
     "Virtual desktop: "
     f"{SCREEN_LEFT}, {SCREEN_TOP} -> "
@@ -154,7 +328,10 @@ print(
 )
 
 
-# Cache frequently used Win32 function lookups.
+# ------------------------------------------------------------
+# Win32 marker functions
+# ------------------------------------------------------------
+
 GET_ANCESTOR = user32.GetAncestor
 GET_ANCESTOR.argtypes = [
     wintypes.HWND,
@@ -191,246 +368,6 @@ SET_WINDOW_LONG.restype = ctypes.c_long
 
 GA_ROOT = 2
 
-
-# ------------------------------------------------------------
-# Logging
-# ------------------------------------------------------------
-
-def get_log_directory() -> Path:
-    """
-    Return the application's log directory, creating it when necessary.
-
-    Returns:
-        Path to the ``logs`` directory beside this script.
-    """
-    log_directory = Path(__file__).resolve().parent / "logs"
-
-    log_directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    return log_directory
-
-
-def start_logging() -> None:
-    """
-    Enable application logging if it is not already active.
-
-    A new timestamped log file is created in the local ``logs`` directory.
-    """
-    global logging_enabled
-    global log_handler
-    global log_path
-
-    with logging_lock:
-        if log_handler is not None:
-            return
-
-        timestamp = datetime.now().strftime(
-            "%Y-%m-%d_%H-%M-%S"
-        )
-
-        log_path = (
-            get_log_directory()
-            / f"nbody_gravity_{timestamp}.log"
-        )
-
-        log_handler = logging.FileHandler(
-            log_path,
-            encoding="utf-8",
-        )
-
-        log_handler.setLevel(
-            logging.DEBUG
-        )
-
-        formatter = logging.Formatter(
-            "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-
-        log_handler.setFormatter(
-            formatter
-        )
-
-        logger.addHandler(
-            log_handler
-        )
-
-        logging_enabled = True
-
-    logger.info(
-        "LOGGING | enabled"
-    )
-
-    log_configuration()
-
-    print(
-        f"Logging enabled: {log_path}"
-    )
-
-
-def stop_logging() -> None:
-    """
-    Disable logging and close the current log file.
-    """
-    global logging_enabled
-    global log_handler
-
-    with logging_lock:
-        if log_handler is None:
-            logging_enabled = False
-            return
-
-        logger.info(
-            "LOGGING | disabled"
-        )
-
-        handler = log_handler
-
-        log_handler = None
-        logging_enabled = False
-
-        logger.removeHandler(
-            handler
-        )
-
-        handler.flush()
-        handler.close()
-
-    print("Logging disabled.")
-
-
-def log_configuration() -> None:
-    """
-    Write the current N-body configuration to the active log.
-    """
-    logger.info(
-        "N-Body Gravity started"
-    )
-
-    logger.info(
-        "CONFIG | "
-        "point_gravity=%s | "
-        "reference_distance=%s | "
-        "gravity_distance_power=%s | "
-        "min_gravity_distance=%s | "
-        "max_gravity_acceleration=%s | "
-        "body_stop_radius=%s",
-        config.point_gravity,
-        config.reference_distance,
-        config.gravity_distance_power,
-        config.min_gravity_distance,
-        config.max_gravity_acceleration,
-        config.body_stop_radius,
-    )
-
-    logger.info(
-        "CONFIG | "
-        "multi_point_count=%s | "
-        "point_drag=%s | "
-        "point_max_speed=%s | "
-        "point_physics_hz=%s",
-        config.multi_point_count,
-        config.point_drag,
-        config.point_max_speed,
-        config.point_physics_hz,
-    )
-
-    logger.info(
-        "CONFIG | "
-        "triangle_spawn_radius=%s | "
-        "pentagram_spawn_radius=%s | "
-        "n_body_spawn_delay=%s",
-        config.triangle_spawn_radius,
-        config.pentagram_spawn_radius,
-        config.n_body_spawn_delay,
-    )
-
-
-def log_candidate_preset(
-    preset_name: str,
-    values: dict,
-) -> None:
-    """
-    Write a user-created candidate preset to the application log.
-
-    Logging is automatically enabled if necessary.
-
-    Args:
-        preset_name: User-selected preset name.
-        values: Mapping of config field names to candidate values.
-    """
-    if not logging_enabled:
-        start_logging()
-
-    logger.info(
-        "USER_PRESET_BEGIN | name=%s",
-        preset_name,
-    )
-
-    for field_name, value in values.items():
-        logger.info(
-            "USER_PRESET_VALUE | name=%s | %s=%s",
-            preset_name,
-            field_name,
-            value,
-        )
-
-    logger.info(
-        "USER_PRESET_END | name=%s",
-        preset_name,
-    )
-
-
-# ------------------------------------------------------------
-# Gravity-point state
-# ------------------------------------------------------------
-
-def clear_gravity_points() -> None:
-    """
-    Remove every active gravity point.
-
-    The physics thread is awakened immediately so it can observe the changed
-    state without waiting for the idle polling interval.
-    """
-    with state_lock:
-        gravity_points.clear()
-
-    if logging_enabled:
-        logger.info(
-            "GRAVITY_POINTS | cleared"
-        )
-
-    physics_wake_event.set()
-
-    print(
-        "Gravity points cleared."
-    )
-
-
-def get_point_status() -> tuple[int, int]:
-    """
-    Return the current point count and configured placement limit.
-
-    Returns:
-        A tuple containing ``points_placed`` and ``point_limit``.
-    """
-    with state_lock:
-        return (
-            len(gravity_points),
-            min(
-                config.multi_point_count,
-                MAX_GRAVITY_POINTS,
-            ),
-        )
-
-
-# ------------------------------------------------------------
-# Target markers
-# ------------------------------------------------------------
-
 GWL_EXSTYLE = -20
 
 WS_EX_TRANSPARENT = 0x00000020
@@ -442,15 +379,90 @@ SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
 
 
-def _get_marker_hwnd(marker):
-    """
-    Return the root HWND for a Tkinter marker window.
+# ------------------------------------------------------------
+# Gravity-point state
+# ------------------------------------------------------------
 
-    Args:
-        marker: Tkinter ``Toplevel`` marker.
+
+def clear_gravity_points() -> None:
+    """
+    Remove all active gravity points and disable placement bias.
+    """
+    global place_bias_active
+
+    with state_lock:
+        gravity_points.clear()
+        place_bias_active = False
+
+    physics_wake_event.set()
+
+    if logging_enabled:
+        logger.info("GRAVITY_POINTS | cleared")
+
+        logger.info("PLACE_BIAS | " "active=False | " "reason=points_cleared")
+
+    print("Gravity points cleared.")
+
+
+def get_point_status() -> tuple[int, int]:
+    """
+    Return the current point count and configured point limit.
 
     Returns:
-        Native Windows handle for the marker's root window.
+        Tuple containing points placed and maximum allowed points.
+    """
+    with state_lock:
+        return (
+            len(gravity_points),
+            min(
+                config.multi_point_count,
+                MAX_GRAVITY_POINTS,
+            ),
+        )
+
+
+def replace_gravity_points(
+    points: list[GravityPoint],
+    preset_name: str,
+) -> None:
+    """
+    Replace the current simulation with a preset point group.
+
+    Placement bias is disabled because preset-generated points should
+    initially have equal influence.
+
+    Args:
+        points:
+            New gravity-point list.
+
+        preset_name:
+            Preset name used for logging.
+    """
+    global place_bias_active
+
+    with state_lock:
+        gravity_points.clear()
+        gravity_points.extend(points)
+
+        place_bias_active = False
+
+    physics_wake_event.set()
+
+    if logging_enabled:
+        logger.info(
+            "PLACE_BIAS | " "active=False | " "reason=preset_spawn | " "preset=%s",
+            preset_name,
+        )
+
+
+# ------------------------------------------------------------
+# Target markers
+# ------------------------------------------------------------
+
+
+def _get_marker_hwnd(marker):
+    """
+    Return the native root window handle for a Tkinter marker.
     """
     marker.update_idletasks()
 
@@ -461,25 +473,18 @@ def _get_marker_hwnd(marker):
         GA_ROOT,
     )
 
-    return (
-        root_hwnd
-        if root_hwnd
-        else client_hwnd
-    )
+    return root_hwnd if root_hwnd else client_hwnd
 
 
-def _make_marker_click_through(marker) -> None:
+def _make_marker_click_through(
+    marker,
+) -> None:
     """
-    Make a marker ignore mouse input while remaining visible.
-
-    Args:
-        marker: Tkinter ``Toplevel`` marker.
+    Make a marker ignore mouse input.
     """
-    hwnd = _get_marker_hwnd(
-        marker
-    )
+    hwnd = _get_marker_hwnd(marker)
 
-    current_style = GET_WINDOW_LONG(
+    style = GET_WINDOW_LONG(
         hwnd,
         GWL_EXSTYLE,
     )
@@ -487,22 +492,15 @@ def _make_marker_click_through(marker) -> None:
     SET_WINDOW_LONG(
         hwnd,
         GWL_EXSTYLE,
-        current_style
-        | WS_EX_TRANSPARENT
-        | WS_EX_TOOLWINDOW,
+        style | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
     )
 
 
 def _create_target_marker():
     """
-    Create one transparent, topmost, click-through green point marker.
-
-    Returns:
-        Tkinter ``Toplevel`` marker window.
+    Create one transparent, click-through gravity-point marker.
     """
-    marker = tk.Toplevel(
-        tk_root
-    )
+    marker = tk.Toplevel(tk_root)
 
     marker.withdraw()
     marker.overrideredirect(True)
@@ -511,9 +509,7 @@ def _create_target_marker():
         True,
     )
 
-    marker.configure(
-        bg=MARKER_TRANSPARENT_COLOR,
-    )
+    marker.configure(bg=MARKER_TRANSPARENT_COLOR)
 
     marker.wm_attributes(
         "-transparentcolor",
@@ -540,30 +536,25 @@ def _create_target_marker():
         outline=MARKER_COLOR,
     )
 
-    marker.geometry(
-        f"{MARKER_SIZE}x{MARKER_SIZE}+0+0"
-    )
+    marker.geometry(f"{MARKER_SIZE}x" f"{MARKER_SIZE}+0+0")
 
-    # The native window must exist once before its Win32 extended style can
-    # be changed. It is hidden immediately afterward.
+    # Windows must create the native window before its extended
+    # styles can be changed.
     marker.deiconify()
     marker.update_idletasks()
 
-    _make_marker_click_through(
-        marker
-    )
+    _make_marker_click_through(marker)
 
     marker.withdraw()
 
     return marker
 
 
-def _ensure_marker_count(required_count: int) -> None:
+def _ensure_marker_count(
+    required_count: int,
+) -> None:
     """
-    Grow the marker pool to cover the required point count.
-
-    Args:
-        required_count: Number of markers currently required.
+    Ensure enough marker windows exist for all gravity points.
     """
     required_count = min(
         required_count,
@@ -571,17 +562,11 @@ def _ensure_marker_count(required_count: int) -> None:
     )
 
     while len(target_markers) < required_count:
-        target_markers.append(
-            _create_target_marker()
-        )
+        target_markers.append(_create_target_marker())
 
-        target_marker_visible.append(
-            False
-        )
+        target_marker_visible.append(False)
 
-        target_marker_positions.append(
-            None
-        )
+        target_marker_positions.append(None)
 
 
 def _show_or_move_marker(
@@ -590,36 +575,21 @@ def _show_or_move_marker(
     y: float,
 ) -> None:
     """
-    Show or reposition one marker when its pixel position changes.
-
-    Args:
-        index: Marker index.
-        x: Point X coordinate.
-        y: Point Y coordinate.
+    Display or reposition one marker.
     """
-    marker = target_markers[
-        index
-    ]
+    marker_x = round(x - MARKER_SIZE / 2)
 
-    marker_x = round(
-        x - MARKER_SIZE / 2
-    )
+    marker_y = round(y - MARKER_SIZE / 2)
 
-    marker_y = round(
-        y - MARKER_SIZE / 2
-    )
-
-    marker_position = (
+    position = (
         marker_x,
         marker_y,
     )
 
-    if (
-        target_marker_visible[index]
-        and target_marker_positions[index]
-        == marker_position
-    ):
+    if target_marker_visible[index] and target_marker_positions[index] == position:
         return
+
+    marker = target_markers[index]
 
     if not target_marker_visible[index]:
         marker.deiconify()
@@ -637,60 +607,38 @@ def _show_or_move_marker(
         SWP_NOACTIVATE | SWP_SHOWWINDOW,
     )
 
-    target_marker_positions[
-        index
-    ] = marker_position
+    target_marker_positions[index] = position
 
 
-def _hide_marker(index: int) -> None:
+def _hide_marker(
+    index: int,
+) -> None:
     """
-    Hide one marker when it is currently visible.
-
-    Args:
-        index: Marker index.
+    Hide one currently visible marker.
     """
     if not target_marker_visible[index]:
         return
 
-    target_markers[
-        index
-    ].withdraw()
+    target_markers[index].withdraw()
 
-    target_marker_visible[
-        index
-    ] = False
+    target_marker_visible[index] = False
 
-    target_marker_positions[
-        index
-    ] = None
+    target_marker_positions[index] = None
 
 
 def update_target_markers() -> None:
     """
-    Refresh marker positions at a visual-only update rate.
-
-    Gravity-point coordinates are copied under the shared-state lock. All
-    Tkinter and Win32 work then occurs after the lock is released.
+    Refresh marker positions at the visual update rate.
     """
-    if (
-        tk_root is None
-        or not running.is_set()
-    ):
+    if tk_root is None or not running.is_set():
         return
 
     with state_lock:
-        positions = tuple(
-            (point.x, point.y)
-            for point in gravity_points
-        )
+        positions = tuple((point.x, point.y) for point in gravity_points)
 
-    _ensure_marker_count(
-        len(positions)
-    )
+    _ensure_marker_count(len(positions))
 
-    for index, position in enumerate(
-        positions
-    ):
+    for index, position in enumerate(positions):
         _show_or_move_marker(
             index,
             *position,
@@ -700,26 +648,26 @@ def update_target_markers() -> None:
         len(positions),
         len(target_markers),
     ):
-        _hide_marker(
-            index
-        )
+        _hide_marker(index)
 
     try:
         tk_root.after(
             MARKER_REFRESH_MS,
             update_target_markers,
         )
+
     except tk.TclError:
         pass
 
 
 def destroy_target_markers() -> None:
     """
-    Destroy every marker overlay and clear cached marker state.
+    Destroy every marker window.
     """
     for marker in target_markers:
         try:
             marker.destroy()
+
         except tk.TclError:
             pass
 
@@ -732,15 +680,19 @@ def destroy_target_markers() -> None:
 # Tray icon
 # ------------------------------------------------------------
 
-def create_vortex_icon(size: int = 64) -> Image.Image:
+
+def create_vortex_icon(
+    size: int = 64,
+) -> Image.Image:
     """
-    Create the application's vortex-style tray icon.
+    Create the vortex-style system tray icon.
 
     Args:
-        size: Icon width and height in pixels.
+        size:
+            Icon width and height.
 
     Returns:
-        Generated RGBA PIL image.
+        Generated PIL image.
     """
     image = Image.new(
         "RGBA",
@@ -748,55 +700,34 @@ def create_vortex_icon(size: int = 64) -> Image.Image:
         (15, 5, 25, 255),
     )
 
-    draw = ImageDraw.Draw(
-        image
-    )
+    draw = ImageDraw.Draw(image)
 
     center_x = size / 2
     center_y = size / 2
 
     for arm in range(4):
         points = []
-        arm_offset = arm * (
-            math.pi / 2
-        )
 
-        for i in range(120):
-            t = i / 119
+        arm_offset = arm * math.pi / 2
 
-            angle = (
-                arm_offset
-                + t * math.pi * 3.5
-            )
+        for index in range(120):
+            t = index / 119
 
-            radius = (
-                size * 0.42 * (1 - t)
-                + 2
-            )
+            angle = arm_offset + t * math.pi * 3.5
 
-            x = (
-                center_x
-                + math.cos(angle) * radius
-            )
-
-            y = (
-                center_y
-                + math.sin(angle) * radius
-            )
+            radius = size * 0.42 * (1 - t) + 2
 
             points.append(
-                (x, y)
+                (
+                    center_x + math.cos(angle) * radius,
+                    center_y + math.sin(angle) * radius,
+                )
             )
-
-        purple = (
-            90
-            + arm * 20
-        )
 
         draw.line(
             points,
             fill=(
-                purple,
+                90 + arm * 20,
                 20,
                 150,
                 255,
@@ -804,9 +735,7 @@ def create_vortex_icon(size: int = 64) -> Image.Image:
             width=3,
         )
 
-    center_radius = (
-        size * 0.10
-    )
+    center_radius = size * 0.10
 
     draw.ellipse(
         (
@@ -826,13 +755,12 @@ def create_vortex_icon(size: int = 64) -> Image.Image:
     return image
 
 
-def toggle_logging(icon, item) -> None:
+def toggle_logging(
+    icon,
+    item,
+) -> None:
     """
-    Toggle runtime logging from the tray menu.
-
-    Args:
-        icon: Pystray icon instance.
-        item: Activated pystray menu item.
+    Toggle logging from the tray menu.
     """
     if logging_enabled:
         stop_logging()
@@ -842,17 +770,14 @@ def toggle_logging(icon, item) -> None:
     icon.update_menu()
 
 
-def open_log_folder(icon, item) -> None:
+def open_log_folder(
+    icon,
+    item,
+) -> None:
     """
-    Open the application's log directory in Windows Explorer.
-
-    Args:
-        icon: Pystray icon instance.
-        item: Activated pystray menu item.
+    Open the log directory in Windows Explorer.
     """
-    os.startfile(
-        get_log_directory()
-    )
+    os.startfile(get_log_directory())
 
 
 def show_settings_window(
@@ -860,16 +785,9 @@ def show_settings_window(
     item=None,
 ) -> None:
     """
-    Schedule display of the Tkinter settings window.
-
-    Args:
-        icon: Optional pystray icon instance.
-        item: Optional activated pystray menu item.
+    Display the Tkinter settings window.
     """
-    if (
-        tk_root is None
-        or settings_ui is None
-    ):
+    if tk_root is None or settings_ui is None:
         return
 
     tk_root.after(
@@ -882,9 +800,10 @@ def show_settings_window(
 # Shutdown
 # ------------------------------------------------------------
 
+
 def shutdown() -> None:
     """
-    Stop the listener, physics loop, tray icon, and Tkinter application.
+    Stop all application components.
     """
     global click_timer
 
@@ -892,9 +811,7 @@ def shutdown() -> None:
         return
 
     if logging_enabled:
-        logger.info(
-            "SHUTDOWN | beginning shutdown"
-        )
+        logger.info("SHUTDOWN | beginning shutdown")
 
     running.clear()
     physics_wake_event.set()
@@ -923,202 +840,156 @@ def shutdown() -> None:
             pass
 
 
-def tray_exit(icon, item) -> None:
+def tray_exit(
+    icon,
+    item,
+) -> None:
     """
-    Exit callback for the tray menu.
-
-    Args:
-        icon: Pystray icon instance.
-        item: Activated pystray menu item.
+    Exit from the tray menu.
     """
     if logging_enabled:
-        logger.info(
-            "EXIT | tray menu"
-        )
+        logger.info("EXIT | tray menu")
 
     shutdown()
 
 
 # ------------------------------------------------------------
-# N-body placement presets
+# Placement presets
 # ------------------------------------------------------------
+
+
+def _radial_points(
+    center_x: float,
+    center_y: float,
+    radius: float,
+    count: int,
+) -> list[GravityPoint]:
+    """
+    Create evenly spaced points around a center position.
+
+    Args:
+        center_x:
+            Center X coordinate.
+
+        center_y:
+            Center Y coordinate.
+
+        radius:
+            Distance from the center to each point.
+
+        count:
+            Number of points.
+
+    Returns:
+        Generated gravity points.
+    """
+    start_angle = -math.pi / 2
+
+    return [
+        GravityPoint(
+            x=(center_x + math.cos(angle) * radius),
+            y=(center_y + math.sin(angle) * radius),
+        )
+        for index in range(count)
+        for angle in [start_angle + index * (2 * math.pi / count)]
+    ]
+
 
 def spawn_triangle_preset() -> None:
     """
-    Replace active points with an equilateral triangle around the cursor.
-
-    ``triangle_spawn_radius`` is measured from the cursor to each vertex.
-    The cursor position is read only when this function executes, allowing
-    delayed preset placement.
+    Spawn an equilateral triangle around the current cursor position.
     """
     cursor_x, cursor_y = controller.position
 
-    radius = (
-        config.triangle_spawn_radius
+    radius = config.triangle_spawn_radius
+
+    replace_gravity_points(
+        _radial_points(
+            cursor_x,
+            cursor_y,
+            radius,
+            3,
+        ),
+        "triangle",
     )
-
-    points = []
-
-    # Start with one point directly above the cursor.
-    start_angle = (
-        -math.pi / 2
-    )
-
-    for index in range(3):
-        angle = (
-            start_angle
-            + index * (2 * math.pi / 3)
-        )
-
-        points.append(
-            GravityPoint(
-                x=(
-                    cursor_x
-                    + math.cos(angle) * radius
-                ),
-                y=(
-                    cursor_y
-                    + math.sin(angle) * radius
-                ),
-            )
-        )
-
-    with state_lock:
-        gravity_points.clear()
-        gravity_points.extend(
-            points
-        )
-
-    physics_wake_event.set()
 
     if logging_enabled:
         logger.info(
-            "N_BODY_PRESET | preset=triangle | radius=%s",
+            "N_BODY_PRESET | " "preset=triangle | " "radius=%s",
             radius,
         )
 
-    print(
-        f"Spawned triangle preset at radius {radius}."
-    )
+    print(f"Spawned triangle preset at radius {radius}.")
 
 
 def spawn_pentagram_preset() -> None:
     """
-    Replace active points with five equally spaced points around the cursor.
-
-    The five vertices correspond to the outer vertices of a pentagram.
-    ``pentagram_spawn_radius`` is measured from the cursor to each vertex.
+    Spawn five equally spaced points around the current cursor position.
     """
     cursor_x, cursor_y = controller.position
 
-    radius = (
-        config.pentagram_spawn_radius
+    radius = config.pentagram_spawn_radius
+
+    replace_gravity_points(
+        _radial_points(
+            cursor_x,
+            cursor_y,
+            radius,
+            5,
+        ),
+        "pentagram",
     )
-
-    points = []
-
-    # Start with one point directly above the cursor.
-    start_angle = (
-        -math.pi / 2
-    )
-
-    for index in range(5):
-        angle = (
-            start_angle
-            + index * (2 * math.pi / 5)
-        )
-
-        points.append(
-            GravityPoint(
-                x=(
-                    cursor_x
-                    + math.cos(angle) * radius
-                ),
-                y=(
-                    cursor_y
-                    + math.sin(angle) * radius
-                ),
-            )
-        )
-
-    with state_lock:
-        gravity_points.clear()
-        gravity_points.extend(
-            points
-        )
-
-    physics_wake_event.set()
 
     if logging_enabled:
         logger.info(
-            "N_BODY_PRESET | preset=pentagram | radius=%s",
+            "N_BODY_PRESET | " "preset=pentagram | " "radius=%s",
             radius,
         )
 
-    print(
-        f"Spawned pentagram preset at radius {radius}."
-    )
+    print(f"Spawned pentagram preset at radius {radius}.")
+
 
 def spawn_random_point_preset() -> None:
     """
-    Replace active points with randomly placed points around the cursor.
+    Spawn randomly positioned points around the current cursor.
 
-    ``random_spawn_radius`` is measured from the cursor to each vertex.
-    The cursor position is read only when this function executes, allowing
-    delayed preset placement.
+    Each point is placed at ``random_spawn_radius`` from the cursor.
     """
-
-    def alpha():
-        "Returns a random angle"
-        alpha = 2 * math.pi * random.random()
-        return alpha
-
-
     cursor_x, cursor_y = controller.position
 
-    radius = (
-        config.random_spawn_radius
-    )
+    radius = config.random_spawn_radius
 
     points = []
 
-    for index in range(config.random_spawn_number):
-        # define a circle around the cursor
+    for _ in range(config.random_spawn_number):
+        angle = 2 * math.pi * random.random()
 
         points.append(
             GravityPoint(
-                x=(
-                    radius * math.cos(alpha()) + cursor_x
-                ),
-                y=(
-                    radius * math.cos(alpha()) + cursor_y
-                ),
+                x=(cursor_x + radius * math.cos(angle)),
+                y=(cursor_y + radius * math.sin(angle)),
             )
         )
 
-    with state_lock:
-        gravity_points.clear()
-        gravity_points.extend(
-            points
-        )
-
-    physics_wake_event.set()
+    replace_gravity_points(
+        points,
+        "random",
+    )
 
     if logging_enabled:
         logger.info(
-            "N_BODY_PRESET | preset=random | radius=%s",
+            "N_BODY_PRESET | " "preset=random | " "radius=%s | " "count=%s",
             radius,
+            len(points),
         )
 
-    print(
-        f"Spawned random points preset at radius {radius}."
-    )
-
+    print("Spawned random points preset " f"at radius {radius}.")
 
 
 # ------------------------------------------------------------
 # Click handling
 # ------------------------------------------------------------
+
 
 def process_click_sequence(
     x: float,
@@ -1128,22 +999,25 @@ def process_click_sequence(
     Resolve a completed click sequence.
 
     Double-click:
-        Place one gravity point. If the configured point limit has already
-        been reached, the oldest point is removed first and the new point
-        is appended.
+        Place a gravity point.
 
     Triple-click:
         Clear all gravity points.
 
     Args:
-        x: Mouse X coordinate captured for the click sequence.
-        y: Mouse Y coordinate captured for the click sequence.
+        x:
+            Click X coordinate.
+
+        y:
+            Click Y coordinate.
     """
     global click_count
     global click_timer
+    global place_bias_active
 
     with click_lock:
         count = click_count
+
         click_count = 0
         click_timer = None
 
@@ -1159,11 +1033,7 @@ def process_click_sequence(
 
             removed_point = None
 
-            if (
-                len(gravity_points)
-                >= point_limit
-            ):
-                # New placements always replace the oldest active point.
+            if len(gravity_points) >= point_limit:
                 removed_point = gravity_points.pop(0)
 
             gravity_points.append(
@@ -1173,32 +1043,31 @@ def process_click_sequence(
                 )
             )
 
-            point_number = len(
-                gravity_points
-            )
+            # The newest manually placed point becomes biased.
+            place_bias_active = True
 
-        if (
-            removed_point is not None
-            and logging_enabled
-        ):
+            point_number = len(gravity_points)
+
+        if removed_point is not None and logging_enabled:
             logger.info(
-                "GRAVITY_POINT | oldest_removed=%s",
+                "GRAVITY_POINT | " "oldest_removed=%s",
                 removed_point,
             )
 
         if logging_enabled:
             logger.info(
-                "GRAVITY_POINT | number=%s | x=%s | y=%s",
+                "GRAVITY_POINT | " "number=%s | " "x=%.2f | " "y=%.2f",
                 point_number,
                 x,
                 y,
             )
 
-        print(
-            "Gravity point "
-            f"{point_number}/{point_limit}: "
-            f"{(x, y)}"
-        )
+            logger.info(
+                "PLACE_BIAS | " "active=True | " "point_index=%s",
+                point_number - 1,
+            )
+
+        print("Gravity point " f"{point_number}/" f"{point_limit}: " f"{(x, y)}")
 
         physics_wake_event.set()
 
@@ -1213,16 +1082,23 @@ def on_click(
     pressed,
 ):
     """
-    Process mouse-button presses for click-sequence recognition.
+    Track mouse clicks and recognize multi-click commands.
 
     Args:
-        x: X coordinate of the mouse event.
-        y: Y coordinate of the mouse event.
-        button: Pynput mouse button associated with the event.
-        pressed: True on button press, False on release.
+        x:
+            Mouse X coordinate.
+
+        y:
+            Mouse Y coordinate.
+
+        button:
+            Pynput mouse button.
+
+        pressed:
+            True for button press and False for release.
 
     Returns:
-        False when quadruple-click shutdown is requested; otherwise None.
+        False when quadruple-click shutdown is triggered.
     """
     global click_count
     global last_click_time
@@ -1235,10 +1111,7 @@ def on_click(
     should_exit = False
 
     with click_lock:
-        if (
-            now - last_click_time
-            > config.click_sequence_timeout
-        ):
+        if now - last_click_time > config.click_sequence_timeout:
             click_count = 0
 
         click_count += 1
@@ -1267,64 +1140,120 @@ def on_click(
 
     if should_exit:
         if logging_enabled:
-            logger.info(
-                "EXIT | quadruple click detected"
-            )
+            logger.info("EXIT | " "quadruple click detected")
 
-        print(
-            "Quadruple click detected. Exiting."
-        )
+        print("Quadruple click detected. Exiting.")
 
         shutdown()
+
         return False
 
 
 # ------------------------------------------------------------
-# Point physics
+# Physics
 # ------------------------------------------------------------
+
+
+def _create_telemetry_snapshot():
+    """
+    Create an immutable snapshot of the current point state.
+
+    The caller must hold ``state_lock``.
+
+    Returns:
+        Tuple containing point telemetry records.
+    """
+    biased_index = (
+        len(gravity_points) - 1 if (place_bias_active and gravity_points) else None
+    )
+
+    return tuple(
+        (
+            index,
+            point.x,
+            point.y,
+            point.velocity_x,
+            point.velocity_y,
+            index == biased_index,
+        )
+        for index, point in enumerate(gravity_points)
+    )
+
+
+def _log_telemetry(
+    snapshot,
+) -> None:
+    """
+    Write a point-state snapshot to the debug log.
+
+    Args:
+        snapshot:
+            Snapshot returned by ``_create_telemetry_snapshot``.
+    """
+    for (
+        index,
+        x,
+        y,
+        velocity_x,
+        velocity_y,
+        biased,
+    ) in snapshot:
+
+        logger.debug(
+            "POINT_TELEMETRY | "
+            "index=%s | "
+            "x=%.2f | "
+            "y=%.2f | "
+            "vx=%.2f | "
+            "vy=%.2f | "
+            "speed=%.2f | "
+            "biased=%s",
+            index,
+            x,
+            y,
+            velocity_x,
+            velocity_y,
+            math.hypot(
+                velocity_x,
+                velocity_y,
+            ),
+            biased,
+        )
+
 
 def gravity_loop() -> None:
     """
-    Advance active gravity points under mutual attraction.
+    Advance gravity points under mutual attraction.
 
-    Point physics runs at ``config.point_physics_hz``. When fewer than two
-    points exist, the thread sleeps at a low polling rate and can be awakened
-    immediately through ``physics_wake_event``.
+    Physics runs at ``config.point_physics_hz`` whenever at least two
+    points exist. With fewer points, the thread uses a lower idle rate.
 
-    The mouse cursor is never sampled or modified by this loop.
+    Point telemetry is copied while holding ``state_lock`` and logged only
+    after releasing the lock, preventing file I/O from blocking physics
+    state access.
 
-    Repeated consecutive simulation failures trigger application shutdown.
+    Five consecutive physics errors trigger application shutdown.
     """
     global last_frame_error
 
-    previous_time = (
-        time.perf_counter()
-    )
+    previous_time = time.perf_counter()
 
-    telemetry_interval = (
-        1.0 / config.log_telemetry_hz if config.log_telemetry_hz > 0 else None
-    )
-
-    last_telemetry_time = time.perf_counter()
-
+    last_telemetry_time = previous_time
 
     consecutive_errors = 0
 
     while running.is_set():
-        frame_start = (
-            time.perf_counter()
-        )
-
-        current_time = frame_start
+        frame_start = time.perf_counter()
 
         dt = min(
-            current_time - previous_time,
+            frame_start - previous_time,
             0.1,
         )
 
-        previous_time = current_time
+        previous_time = frame_start
 
         point_count = 0
+        telemetry_snapshot = None
 
         try:
             with state_lock:
@@ -1333,49 +1262,41 @@ def gravity_loop() -> None:
                     MAX_GRAVITY_POINTS,
                 )
 
-                # If the configured limit is lowered, discard the oldest
-                # excess points so the newest placements remain active.
-                excess_points = (
-                    len(gravity_points)
-                    - point_limit
-                )
+                excess_points = len(gravity_points) - point_limit
 
                 if excess_points > 0:
-                    del gravity_points[
-                        :excess_points
-                    ]
+                    del gravity_points[:excess_points]
 
-                point_count = len(
-                    gravity_points
-                )
+                point_count = len(gravity_points)
 
                 if point_count >= 2:
                     removed_point = update_gravity_points(
                         gravity_points,
                         dt,
                         SCREEN_BOUNDS,
+                        place_bias=place_bias_active,
                     )
 
-                    if (
-                        removed_point is not None
-                        and logging_enabled
-                    ):
+                    if removed_point is not None and logging_enabled:
                         logger.info(
-                            "GRAVITY_POINT | merged_oldest_removed=%s",
+                            "GRAVITY_POINT | " "merged_oldest_removed=%s",
                             removed_point,
                         )
 
+                telemetry_hz = config.log_telemetry_hz
+
                 if (
                     logging_enabled
-                    and telemetry_interval is not None
-                    and (current_time - last_telemetry_time >= telemetry_interval)
+                    and telemetry_hz > 0
+                    and (frame_start - last_telemetry_time) >= (1.0 / telemetry_hz)
                 ):
+                    telemetry_snapshot = _create_telemetry_snapshot()
 
-                    last_telemetry_time = current_time
+                    last_telemetry_time = frame_start
 
-                    pass
-
-
+            # Log only after releasing the shared-state lock.
+            if telemetry_snapshot is not None:
+                _log_telemetry(telemetry_snapshot)
 
             consecutive_errors = 0
             last_frame_error = ""
@@ -1383,17 +1304,10 @@ def gravity_loop() -> None:
         except Exception as exc:
             consecutive_errors += 1
 
-            if (
-                not last_frame_error
-                or last_frame_error != str(exc)
-            ):
-                print(
-                    f"Physics error: {exc}"
-                )
+            if last_frame_error != str(exc):
+                print(f"Physics error: {exc}")
 
-            last_frame_error = str(
-                exc
-            )
+            last_frame_error = str(exc)
 
             if logging_enabled:
                 logger.error(
@@ -1403,43 +1317,29 @@ def gravity_loop() -> None:
                 )
 
             if consecutive_errors >= 5:
-                print(
-                    "Too many consecutive physics errors. Exiting."
-                )
+                print("Too many consecutive " "physics errors. Exiting.")
 
                 shutdown()
                 break
 
-        elapsed = (
-            time.perf_counter()
-            - frame_start
-        )
+        elapsed = time.perf_counter() - frame_start
 
         if point_count >= 2:
-            frame_interval = (
-                1.0
-                / max(
-                    config.point_physics_hz,
-                    1.0,
-                )
+            frame_interval = 1.0 / max(
+                config.point_physics_hz,
+                1.0,
             )
+
         else:
-            frame_interval = (
-                IDLE_PHYSICS_INTERVAL
-            )
+            frame_interval = IDLE_PHYSICS_INTERVAL
 
         wait_time = max(
             0.0,
             frame_interval - elapsed,
         )
 
-        if (
-            wait_time > 0
-            and running.is_set()
-        ):
-            physics_wake_event.wait(
-                wait_time
-            )
+        if wait_time > 0 and running.is_set():
+            physics_wake_event.wait(wait_time)
 
             physics_wake_event.clear()
 
@@ -1448,31 +1348,30 @@ def gravity_loop() -> None:
 # Main
 # ------------------------------------------------------------
 
+
 def main() -> None:
     """
-    Initialize logging, input listener, physics, Tkinter UI, and tray icon.
-
-    All subsystems are shut down when the Tkinter main loop exits.
+    Initialize and run the N-body gravity application.
     """
     global tray_icon
     global listener
     global tk_root
     global settings_ui
 
-    # LOGGING STARTUP
-    section = "Logging Startup"
+    # --------------------------------------------------------
+    # Logging
+    # --------------------------------------------------------
 
     try:
         if config.logging_enabled_by_default:
             start_logging()
 
     except Exception as exc:
-        print(
-            f"Error {exc} happened during: {section}"
-        )
+        print("Error during logging startup: " f"{exc}")
 
-    # MOUSE LISTENER INITIALIZATION
-    section = "Mouse Listener Initialization"
+    # --------------------------------------------------------
+    # Mouse listener
+    # --------------------------------------------------------
 
     try:
         listener = mouse.Listener(
@@ -1482,12 +1381,11 @@ def main() -> None:
         listener.start()
 
     except Exception as exc:
-        print(
-            f"Error {exc} happened during: {section}"
-        )
+        print("Error during mouse listener startup: " f"{exc}")
 
-    # PHYSICS THREAD INITIALIZATION
-    section = "Physics Thread Initialization"
+    # --------------------------------------------------------
+    # Physics thread
+    # --------------------------------------------------------
 
     try:
         physics_thread = threading.Thread(
@@ -1499,12 +1397,11 @@ def main() -> None:
         physics_thread.start()
 
     except Exception as exc:
-        print(
-            f"Error {exc} happened during: {section}"
-        )
+        print("Error during physics startup: " f"{exc}")
 
-    # POP-UP WINDOW CREATION
-    section = "Pop-up Window Creation"
+    # --------------------------------------------------------
+    # Tkinter
+    # --------------------------------------------------------
 
     try:
         tk_root = tk.Tk()
@@ -1520,7 +1417,6 @@ def main() -> None:
             spawn_triangle_callback=spawn_triangle_preset,
             spawn_pentagram_callback=spawn_pentagram_preset,
             spawn_random_callback=spawn_random_point_preset,
-
         )
 
         tk_root.after(
@@ -1529,12 +1425,11 @@ def main() -> None:
         )
 
     except Exception as exc:
-        print(
-            f"Error {exc} happened during: {section}"
-        )
+        print("Error during settings-window startup: " f"{exc}")
 
-    # SYSTEM TRAY ICON POPULATION
-    section = "Tray Icon Population"
+    # --------------------------------------------------------
+    # System tray
+    # --------------------------------------------------------
 
     try:
         tray_icon = pystray.Icon(
@@ -1572,9 +1467,11 @@ def main() -> None:
         tray_icon.run_detached()
 
     except Exception as exc:
-        print(
-            f"Error {exc} happened during: {section}"
-        )
+        print("Error during tray startup: " f"{exc}")
+
+    # --------------------------------------------------------
+    # Main event loop
+    # --------------------------------------------------------
 
     try:
         tk_root.mainloop()
@@ -1585,9 +1482,7 @@ def main() -> None:
 
         if listener is not None:
             listener.stop()
-            listener.join(
-                timeout=1
-            )
+            listener.join(timeout=1)
 
         if tray_icon is not None:
             try:
@@ -1596,15 +1491,11 @@ def main() -> None:
                 pass
 
         if logging_enabled:
-            logger.info(
-                "SHUTDOWN | complete"
-            )
+            logger.info("SHUTDOWN | complete")
 
             stop_logging()
 
-        print(
-            "N-Body Gravity stopped."
-        )
+        print("N-Body Gravity stopped.")
 
 
 if __name__ == "__main__":
